@@ -1,23 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { 
-  CreditCard, 
-  Crown, 
-  Check, 
-  Loader2, 
-  AlertCircle,
+  CheckCircle,
   Calendar,
-  DollarSign,
-  Trash2,
-  User,
-  Shield,
-  Clock
+  AlertTriangle,
+  CreditCard,
+  Crown,
+  Loader2,
+  RefreshCw
 } from 'lucide-react';
 import Toast from './Toast';
 import ConfirmModal from './ConfirmModal';
 
 const SubscriptionManager = () => {
-  const { user } = useAuth();
+  const { } = useAuth();
   const [subscription, setSubscription] = useState(null);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
@@ -308,7 +304,7 @@ const SubscriptionManager = () => {
 
       {error && (
         <div className="bg-red-50 dark:bg-red-900 border border-red-200 dark:border-red-700 text-red-700 dark:text-red-300 px-4 py-3 rounded-md flex items-center transition-colors duration-200">
-          <AlertCircle className="h-5 w-5 mr-2" />
+          <AlertTriangle className="h-5 w-5 mr-2" />
           {error}
         </div>
       )}
@@ -345,7 +341,7 @@ const SubscriptionManager = () => {
                 {isCurrentPlan && (
                   <div className="absolute -top-3 right-4">
                     <span className="bg-green-600 dark:bg-green-500 text-white px-3 py-1 rounded-full text-sm font-medium flex items-center">
-                      <Check className="h-4 w-4 mr-1" />
+                      <CheckCircle className="h-4 w-4 mr-1" />
                       Current
                     </span>
                   </div>
@@ -355,7 +351,7 @@ const SubscriptionManager = () => {
                   <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2 transition-colors duration-200">{plan.name}</h3>
                   <div className="mb-4">
                     <span className="text-3xl font-bold text-gray-900 dark:text-white flex items-center justify-center transition-colors duration-200">
-                      <DollarSign className="h-6 w-6" />
+                      <CreditCard className="h-6 w-6" />
                       {plan.price}
                     </span>
                     <span className="text-gray-600 dark:text-gray-400 transition-colors duration-200">/{plan.period}</span>
@@ -366,7 +362,7 @@ const SubscriptionManager = () => {
                 <ul className="space-y-3 mb-6 flex-grow">
                   {plan.features.map((feature, index) => (
                     <li key={index} className="flex items-center text-sm">
-                      <Check className="h-4 w-4 text-green-500 dark:text-green-400 mr-3 flex-shrink-0" />
+                      <CheckCircle className="h-4 w-4 text-green-500 dark:text-green-400 mr-3 flex-shrink-0" />
                       <span className="text-gray-700 dark:text-gray-300 transition-colors duration-200">{feature}</span>
                     </li>
                   ))}

@@ -1,30 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import {
-  User,
-  Mail,
+import { 
+  Save, 
   Key,
+  User,
   Settings,
-  Shield,
-  Eye,
-  EyeOff,
-  Save,
-  AlertTriangle,
-  CheckCircle,
-  Clock,
-  Download,
-  Trash2,
+  Palette,
   Globe,
-  Bell,
-  Moon,
-  Sun,
-  Copy,
-  LogOut,
-  Smartphone,
-  Calendar,
-  Crown,
-  Loader2
+  Shield,
+  ChevronRight,
+  Trash2
 } from 'lucide-react';
 import Toast from './Toast';
 import ConfirmModal from './ConfirmModal';
@@ -33,14 +19,13 @@ const AccountSettings = () => {
   const { user, logout } = useAuth();
   const { theme, setTheme } = useTheme();
   const [activeTab, setActiveTab] = useState('profile');
-  const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
   const [confirmModal, setConfirmModal] = useState({ show: false, title: '', message: '', onConfirm: () => {} });
 
   // Profile settings state
   const [profileData, setProfileData] = useState({
-    email: user?.email || '',
-    username: user?.username || ''
+    username: user?.username || '',
+    email: user?.email || ''
   });
   const [profileErrors, setProfileErrors] = useState({});
   const [profileSaving, setProfileSaving] = useState(false);
@@ -149,7 +134,6 @@ const AccountSettings = () => {
       });
 
       if (response.ok) {
-        const result = await response.json();
         showToast('Profile updated successfully!', 'success');
         // Update user context if needed
       } else {
@@ -355,7 +339,7 @@ const AccountSettings = () => {
     { id: 'profile', label: 'Profile', icon: <User className="h-4 w-4" /> },
     { id: 'security', label: 'Security', icon: <Shield className="h-4 w-4" /> },
     { id: 'preferences', label: 'Preferences', icon: <Settings className="h-4 w-4" /> },
-    { id: 'account', label: 'Account', icon: <Crown className="h-4 w-4" /> }
+    { id: 'account', label: 'Account', icon: <User className="h-4 w-4" /> }
   ];
 
   return (
@@ -699,7 +683,7 @@ const AccountSettings = () => {
                           className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors duration-200"
                         >
                           <option value="en">🇺🇸 English</option>
-                          <option value="es">��🇸 Español</option>
+                          <option value="es">🇪🇸 Español</option>
                           <option value="fr">🇫🇷 Français</option>
                           <option value="de">🇩🇪 Deutsch</option>
                           <option value="it">🇮🇹 Italiano</option>

@@ -2,12 +2,12 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Monitor, LogOut, User, Copy, Settings, ChevronDown, Home, Shield } from 'lucide-react';
+import { Monitor, LogOut, User, Copy, Settings, ChevronDown, Home } from 'lucide-react';
 import Toast from './Toast';
 
 const Layout = ({ children }) => {
   const { user, logout } = useAuth();
-  const { theme } = useTheme();
+  const { } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' });

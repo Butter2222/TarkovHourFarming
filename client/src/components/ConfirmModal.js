@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, CheckCircle, X, Gift, CreditCard, Clock } from 'lucide-react';
+import { AlertTriangle, CheckCircle, X, Gift } from 'lucide-react';
 
 const ConfirmModal = ({ 
   show, 

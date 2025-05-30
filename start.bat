@@ -1,17 +1,59 @@
 @echo off
-echo ===============================
-echo Starting Proxmox VM Dashboard
-echo ===============================
+echo ==========================================
+echo Proxmox VM Dashboard - One-Click Setup
+echo ==========================================
 
 echo.
-echo Checking if .env file exists...
-if not exist "server\.env" (
-    echo ERROR: server\.env file not found!
-    echo Run setup.bat first to configure the environment.
-    echo.
-    pause
-    exit /b 1
+echo [1/4] Installing root dependencies...
+if not exist "node_modules" (
+    call npm install
+) else (
+    echo INFO: Root dependencies already installed
 )
+
+echo.
+echo [2/4] Installing server dependencies...
+cd server
+if not exist "node_modules" (
+    call npm install
+) else (
+    echo INFO: Server dependencies already installed
+)
+cd ..
+
+echo.
+echo [3/4] Installing client dependencies...
+cd client
+if not exist "node_modules" (
+    call npm install
+) else (
+    echo INFO: Client dependencies already installed
+)
+cd ..
+
+echo.
+echo [4/4] Setting up configuration...
+if not exist "server\.env" (
+    echo Creating environment file...
+    copy "server\env.example" "server\.env"
+    echo Environment file created
+) else (
+    echo INFO: Environment file already exists
+)
+
+echo.
+echo Setting up database...
+cd server
+call npm run setup-db
+echo.
+echo Updating VM assignments...
+node scripts\update-vm-assignments.js
+cd ..
+
+echo.
+echo ==========================================
+echo Setup Complete! Starting Dashboard...
+echo ==========================================
 
 echo.
 echo Starting development servers...

@@ -4,7 +4,7 @@ import api from '../services/api';
 import VMCard from './VMCard';
 import DashboardStats from './DashboardStats';
 import ServerOverview from './ServerOverview';
-import { RefreshCw, AlertCircle, Monitor, Play, Square, RotateCcw, Power, Loader2, CheckCircle, Clock, Cpu, HardDrive, CreditCard, Server, Users, BarChart3 } from 'lucide-react';
+import { RefreshCw, AlertCircle, Monitor, Loader2, CheckCircle, Clock, Cpu, HardDrive, CreditCard, Server, Users, BarChart3 } from 'lucide-react';
 import SubscriptionManager from './SubscriptionManager';
 import AdminPanel from './AdminPanel';
 import Analytics from './Analytics';
@@ -95,37 +95,12 @@ const Dashboard = () => {
     loadData();
   }, []);
 
-  const getStatusColor = (status) => {
-    switch (status?.toLowerCase()) {
-      case 'running':
-        return 'text-green-600 bg-green-100';
-      case 'stopped':
-        return 'text-red-600 bg-red-100';
-      case 'paused':
-        return 'text-yellow-600 bg-yellow-100';
-      default:
-        return 'text-gray-600 bg-gray-100';
-    }
-  };
-
-  const formatUptime = (uptime) => {
-    if (!uptime || uptime === 0) return 'Stopped';
-    
-    const days = Math.floor(uptime / 86400);
-    const hours = Math.floor((uptime % 86400) / 3600);
-    const minutes = Math.floor((uptime % 3600) / 60);
-    
-    if (days > 0) return `${days}d ${hours}h`;
-    if (hours > 0) return `${hours}h ${minutes}m`;
-    return `${minutes}m`;
-  };
-
   const formatBytes = (bytes) => {
     if (!bytes) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
   const tabs = [

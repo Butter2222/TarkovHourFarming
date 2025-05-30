@@ -1,19 +1,23 @@
 import React, { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { Monitor, Lock, User, Mail, UserPlus } from 'lucide-react';
 
 const Login = () => {
-  const [isRegistering, setIsRegistering] = useState(false);
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [email, setEmail] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
   const { login, user } = useAuth();
-  const { theme } = useTheme();
+  const { } = useTheme();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [formData, setFormData] = useState({
+    username: '',
+    password: '',
+    email: '',
+    confirmPassword: ''
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   // Redirect if already logged in
   if (user) {
@@ -25,7 +29,7 @@ const Login = () => {
     setError('');
     setLoading(true);
 
-    const result = await login(username, password);
+    const result = await login(formData.username, formData.password);
     
     if (!result.success) {
       setError(result.error);
@@ -40,13 +44,13 @@ const Login = () => {
     setLoading(true);
 
     // Basic validation
-    if (password !== confirmPassword) {
+    if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
       setLoading(false);
       return;
     }
 
-    if (password.length < 6) {
+    if (formData.password.length < 6) {
       setError('Password must be at least 6 characters long');
       setLoading(false);
       return;
@@ -59,9 +63,9 @@ const Login = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          username,
-          password,
-          email,
+          username: formData.username,
+          password: formData.password,
+          email: formData.email,
         }),
       });
 
@@ -69,7 +73,7 @@ const Login = () => {
 
       if (response.ok) {
         // Registration successful, now log them in
-        const loginResult = await login(username, password);
+        const loginResult = await login(formData.username, formData.password);
         if (!loginResult.success) {
           setError('Registration successful, but login failed. Please try logging in manually.');
         }
@@ -86,10 +90,12 @@ const Login = () => {
   const toggleMode = () => {
     setIsRegistering(!isRegistering);
     setError('');
-    setUsername('');
-    setPassword('');
-    setEmail('');
-    setConfirmPassword('');
+    setFormData({
+      username: '',
+      password: '',
+      email: '',
+      confirmPassword: ''
+    });
   };
 
   return (
@@ -131,8 +137,8 @@ const Login = () => {
                   name="username"
                   type="text"
                   required
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  value={formData.username}
+                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                   className="block w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-primary-500 focus:border-primary-500 transition-colors duration-200"
                   placeholder="Enter your username"
                 />
@@ -153,8 +159,8 @@ const Login = () => {
                     name="email"
                     type="email"
                     required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                     className="block w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-primary-500 focus:border-primary-500 transition-colors duration-200"
                     placeholder="Enter your email"
                   />
@@ -175,8 +181,8 @@ const Login = () => {
                   name="password"
                   type="password"
                   required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   className="block w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-primary-500 focus:border-primary-500 transition-colors duration-200"
                   placeholder="Enter your password"
                 />
@@ -197,8 +203,8 @@ const Login = () => {
                     name="confirmPassword"
                     type="password"
                     required
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    value={formData.confirmPassword}
+                    onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
                     className="block w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-primary-500 focus:border-primary-500 transition-colors duration-200"
                     placeholder="Confirm your password"
                   />
@@ -238,10 +244,12 @@ const Login = () => {
                 onClick={() => {
                   setIsRegistering(!isRegistering);
                   setError('');
-                  setUsername('');
-                  setPassword('');
-                  setEmail('');
-                  setConfirmPassword('');
+                  setFormData({
+                    username: '',
+                    password: '',
+                    email: '',
+                    confirmPassword: ''
+                  });
                 }}
                 className="w-full flex justify-center py-2 px-4 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm bg-white dark:bg-gray-700 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-colors duration-200"
               >

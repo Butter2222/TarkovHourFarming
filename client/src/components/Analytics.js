@@ -1,12 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Users, 
+  Activity, 
+  TrendingUp, 
+  CreditCard, 
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  Search,
+  Download,
   Loader2,
   AlertTriangle,
-  TrendingUp,
   PieChart,
-  CreditCard,
   Target,
   Zap,
   Clock,
@@ -23,12 +29,44 @@ const Analytics = () => {
   const [auditPagination, setAuditPagination] = useState({ page: 1, limit: 50, total: 0 });
   const [error, setError] = useState('');
 
+  const fetchAuditLogs = useCallback(async (page = 1, filters = {}) => {
+    try {
+      setAuditLogsLoading(true);
+      const token = localStorage.getItem('token');
+      
+      const params = new URLSearchParams({
+        page: page.toString(),
+        limit: auditPagination.limit.toString(),
+        ...filters
+      });
+
+      const response = await fetch(`/api/admin/audit-logs?${params}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setAuditLogs(data.logs);
+        setAuditPagination(prev => ({ ...prev, total: data.total, page }));
+      } else {
+        setError('Failed to fetch audit logs');
+      }
+    } catch (error) {
+      console.error('Error fetching audit logs:', error);
+      setError('Network error fetching audit logs.');
+    } finally {
+      setAuditLogsLoading(false);
+    }
+  }, [auditPagination.limit]);
+
   useEffect(() => {
     if (user?.role === 'admin') {
       fetchAnalytics();
       fetchAuditLogs();
     }
-  }, [user]);
+  }, [user, fetchAuditLogs]);
 
   const fetchAnalytics = async () => {
     try {
@@ -51,44 +89,6 @@ const Analytics = () => {
       setError('Network error fetching analytics.');
     } finally {
       setAnalyticsLoading(false);
-    }
-  };
-
-  const fetchAuditLogs = async (page = 1, filters = {}) => {
-    try {
-      setAuditLogsLoading(true);
-      const token = localStorage.getItem('token');
-      
-      const params = new URLSearchParams({
-        page: page.toString(),
-        limit: auditPagination.limit.toString(),
-        ...filters
-      });
-
-      const response = await fetch(`/api/admin/audit-logs?${params}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        // Filter out server overview access spam
-        const filteredLogs = (data.logs || []).filter(log => 
-          log.action !== 'server_overview_access' && 
-          log.action !== 'server_overview' &&
-          log.resource_type !== 'server_overview'
-        );
-        setAuditLogs(filteredLogs);
-        setAuditPagination(data.pagination);
-      } else {
-        setError('Failed to fetch audit logs');
-      }
-    } catch (error) {
-      console.error('Error fetching audit logs:', error);
-      setError('Network error fetching audit logs.');
-    } finally {
-      setAuditLogsLoading(false);
     }
   };
 

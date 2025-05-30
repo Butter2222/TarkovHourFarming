@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Clock, Shield, Zap, CheckCircle, Star, Monitor, Users } from 'lucide-react';
+import { Clock, CheckCircle, Star, ArrowRight } from 'lucide-react';
 
 const LandingPage = () => {
   const navigate = useNavigate();
@@ -12,17 +12,17 @@ const LandingPage = () => {
       description: "Automated hour boosting runs continuously to maximize your in-game time efficiently."
     },
     {
-      icon: <Shield className="h-6 w-6 text-green-600" />,
+      icon: <Clock className="h-6 w-6 text-green-600" />,
       title: "Secure & Private",
       description: "Your account credentials are encrypted and protected with enterprise-grade security."
     },
     {
-      icon: <Zap className="h-6 w-6 text-yellow-600" />,
+      icon: <Clock className="h-6 w-6 text-yellow-600" />,
       title: "Fast Setup",
       description: "Get started in minutes. Simply create an account, choose your plan, and we'll handle the rest."
     },
     {
-      icon: <Monitor className="h-6 w-6 text-purple-600" />,
+      icon: <Clock className="h-6 w-6 text-purple-600" />,
       title: "Dedicated VMs",
       description: "Each customer gets their own isolated virtual machine for optimal performance and security."
     }
