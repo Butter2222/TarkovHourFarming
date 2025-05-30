@@ -270,7 +270,8 @@ class DatabaseService {
   addMissingColumns() {
     // Add updated_at column to users table if it doesn't exist
     try {
-      this.db.exec(`ALTER TABLE users ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+      this.db.exec(`ALTER TABLE users ADD COLUMN updated_at DATETIME`);
+      this.db.exec(`UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
       console.log('✅ Added updated_at column to users table');
     } catch (error) {
       if (!error.message.includes('duplicate column name')) {
@@ -280,7 +281,8 @@ class DatabaseService {
 
     // Add updated_at column to vm_assignments table if it doesn't exist
     try {
-      this.db.exec(`ALTER TABLE vm_assignments ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+      this.db.exec(`ALTER TABLE vm_assignments ADD COLUMN updated_at DATETIME`);
+      this.db.exec(`UPDATE vm_assignments SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
       console.log('✅ Added updated_at column to vm_assignments table');
     } catch (error) {
       if (!error.message.includes('duplicate column name')) {
@@ -290,7 +292,8 @@ class DatabaseService {
 
     // Add updated_at column to sessions table if it doesn't exist
     try {
-      this.db.exec(`ALTER TABLE sessions ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+      this.db.exec(`ALTER TABLE sessions ADD COLUMN updated_at DATETIME`);
+      this.db.exec(`UPDATE sessions SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
       console.log('✅ Added updated_at column to sessions table');
     } catch (error) {
       if (!error.message.includes('duplicate column name')) {
@@ -300,7 +303,8 @@ class DatabaseService {
 
     // Add updated_at column to audit_logs table if it doesn't exist
     try {
-      this.db.exec(`ALTER TABLE audit_logs ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+      this.db.exec(`ALTER TABLE audit_logs ADD COLUMN updated_at DATETIME`);
+      this.db.exec(`UPDATE audit_logs SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
       console.log('✅ Added updated_at column to audit_logs table');
     } catch (error) {
       if (!error.message.includes('duplicate column name')) {
@@ -312,7 +316,8 @@ class DatabaseService {
     // these should be created with updated_at in the main CREATE TABLE, but let's ensure
     // they exist for older databases
     try {
-      this.db.exec(`ALTER TABLE payments ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+      this.db.exec(`ALTER TABLE payments ADD COLUMN updated_at DATETIME`);
+      this.db.exec(`UPDATE payments SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
       console.log('✅ Added updated_at column to payments table');
     } catch (error) {
       if (!error.message.includes('duplicate column name')) {
@@ -321,7 +326,8 @@ class DatabaseService {
     }
 
     try {
-      this.db.exec(`ALTER TABLE refunds ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+      this.db.exec(`ALTER TABLE refunds ADD COLUMN updated_at DATETIME`);
+      this.db.exec(`UPDATE refunds SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
       console.log('✅ Added updated_at column to refunds table');
     } catch (error) {
       if (!error.message.includes('duplicate column name')) {
@@ -330,7 +336,8 @@ class DatabaseService {
     }
 
     try {
-      this.db.exec(`ALTER TABLE payment_disputes ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+      this.db.exec(`ALTER TABLE payment_disputes ADD COLUMN updated_at DATETIME`);
+      this.db.exec(`UPDATE payment_disputes SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
       console.log('✅ Added updated_at column to payment_disputes table');
     } catch (error) {
       if (!error.message.includes('duplicate column name')) {
