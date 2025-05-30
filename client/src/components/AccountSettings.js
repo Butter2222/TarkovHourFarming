@@ -1,16 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
-import { 
-  Save, 
-  Key,
+import {
   User,
+  Key,
   Settings,
-  Palette,
-  Globe,
   Shield,
-  ChevronRight,
-  Trash2
+  Eye,
+  EyeOff,
+  Save,
+  AlertTriangle,
+  Clock,
+  Globe,
+  Moon,
+  Sun,
+  Copy,
+  Calendar,
+  Crown,
+  Loader2
 } from 'lucide-react';
 import Toast from './Toast';
 import ConfirmModal from './ConfirmModal';

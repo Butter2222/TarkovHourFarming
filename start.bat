@@ -79,9 +79,9 @@ echo.
 echo The React application will open automatically in your browser.
 echo If it doesn't open, visit: http://localhost:3000
 echo.
-echo Demo Credentials:
-echo - Customer: customer1 / password123
-echo - Admin: admin / admin123
+echo Admin Credentials:
+echo - Username: admin
+echo - Password: admin123
 echo.
 echo Press any key to close this window...
 pause >nul 

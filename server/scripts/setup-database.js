@@ -87,58 +87,31 @@ db.exec(createTables);
 
 console.log('Database tables created successfully');
 
-// Create demo users with proper bcrypt hashes
-async function createDemoUsers() {
-  console.log('👥 Creating demo users...');
-  
-  const { v4: uuidv4 } = require('uuid');
-  
+// Function to generate custom account ID (6-character alphanumeric like 91Z5IP)
+function generateAccountId() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+// Create admin user only
+async function createAdminUser() {
   const insertUser = db.prepare(`
-    INSERT OR REPLACE INTO users (uuid, username, email, password_hash, role, subscription_plan, subscription_expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-  
-  const insertVMAssignment = db.prepare(`
-    INSERT OR REPLACE INTO vm_assignments (user_id, vm_id) VALUES (?, ?)
+    INSERT OR IGNORE INTO users (
+      uuid, username, email, password_hash, role, subscription_plan, subscription_expires_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   
   try {
-    // Hash passwords properly
-    const customerPassword = await bcrypt.hash('password123', 12);
+    // Hash admin password
     const adminPassword = await bcrypt.hash('admin123', 12);
     
-    // Create customer1
-    const customer1Result = insertUser.run(
-      uuidv4(),
-      'customer1',
-      'customer1@example.com',
-      customerPassword,
-      'customer',
-      'basic',
-      new Date('2024-12-31').toISOString()
-    );
-    
-    // Assign VMs to customer1
-    insertVMAssignment.run(customer1Result.lastInsertRowid, 100);
-    insertVMAssignment.run(customer1Result.lastInsertRowid, 101);
-    
-    // Create customer2
-    const customer2Result = insertUser.run(
-      uuidv4(),
-      'customer2',
-      'customer2@example.com',
-      customerPassword,
-      'customer',
-      'premium',
-      new Date('2024-12-31').toISOString()
-    );
-    
-    // Assign VM to customer2
-    insertVMAssignment.run(customer2Result.lastInsertRowid, 102);
-    
-    // Create admin
-    insertUser.run(
-      uuidv4(),
+    // Create admin account with custom account ID
+    const adminResult = insertUser.run(
+      generateAccountId(),
       'admin',
       'admin@example.com',
       adminPassword,
@@ -147,19 +120,20 @@ async function createDemoUsers() {
       null
     );
     
-    console.log('✅ Demo users created successfully');
-    console.log('📝 Demo credentials:');
-    console.log('   Customer: customer1 / password123 (VMs: 100, 101)');
-    console.log('   Customer: customer2 / password123 (VM: 102)');
-    console.log('   Admin: admin / admin123 (All VMs)');
+    if (adminResult.changes > 0) {
+      console.log('✅ Admin account created successfully');
+      console.log('📝 Admin credentials: admin / admin123');
+    } else {
+      console.log('ℹ️  Admin account already exists');
+    }
     
   } catch (error) {
-    console.error('❌ Error creating demo users:', error);
+    console.error('❌ Error creating admin account:', error);
   }
 }
 
-// Create demo users
-createDemoUsers().then(() => {
+// Create admin user
+createAdminUser().then(() => {
   console.log('Database setup complete!');
   console.log('Database location:', dbPath);
   db.close();
