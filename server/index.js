@@ -6,14 +6,6 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
-// Debug environment loading
-console.log('🔍 Environment Debug:');
-console.log('JWT_SECRET loaded:', process.env.JWT_SECRET ? '[SET]' : '[NOT SET]');
-console.log('JWT_SECRET length:', process.env.JWT_SECRET ? process.env.JWT_SECRET.length : 0);
-console.log('Working directory:', process.cwd());
-console.log('__dirname:', __dirname);
-console.log('.env path:', path.join(__dirname, '.env'));
-
 const authRoutes = require('./routes/auth');
 const vmRoutes = require('./routes/vm');
 const userRoutes = require('./routes/user');
@@ -27,8 +19,28 @@ const PORT = process.env.PORT || 5000;
 // Cloudflare IP ranges - you can also use specific IPs
 app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal']);
 
-// Security middleware
-app.use(helmet());
+// Security middleware with production configuration
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'self'"],
+      frameSrc: ["'none'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  }
+}));
 
 // Rate limiting
 const limiter = rateLimit({
@@ -38,19 +50,42 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// CORS configuration
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
-  credentials: true
-}));
+// CORS configuration for production
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, etc.)
+    if (!origin) return callback(null, true);
+    
+    // In production, only allow your domain
+    const allowedOrigins = [
+      process.env.CORS_ORIGIN,
+      process.env.FRONTEND_URL,
+      'https://your-domain.com' // Replace with your actual domain
+    ].filter(Boolean);
+    
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
+app.use(cors(corsOptions));
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Logging
-if (process.env.NODE_ENV !== 'production') {
+// Logging - only in development
+if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
+} else {
+  // Production logging - less verbose
+  app.use(morgan('combined'));
 }
 
 // Health check endpoint
@@ -84,11 +119,20 @@ app.get('*', (req, res) => {
 
 // Global error handler
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  // Log error details for debugging (only in development)
+  if (process.env.NODE_ENV === 'development') {
+    console.error('Error details:', err.stack);
+  } else {
+    // In production, only log essential error info
+    console.error('Error:', err.message);
+  }
+  
+  // Don't expose internal error details in production
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  
   res.status(err.status || 500).json({
-    error: process.env.NODE_ENV === 'production' 
-      ? 'Something went wrong!' 
-      : err.message
+    error: isDevelopment ? err.message : 'Internal server error',
+    ...(isDevelopment && { stack: err.stack })
   });
 });
 

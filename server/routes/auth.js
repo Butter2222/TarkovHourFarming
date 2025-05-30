@@ -10,52 +10,35 @@ router.post('/login', async (req, res) => {
     const { username, password } = req.body;
     const clientIP = req.ip || req.connection.remoteAddress;
     
-    console.log('Login attempt:', { username, passwordLength: password?.length, ip: clientIP });
-
     if (!username || !password) {
-      console.log('Missing credentials');
       return res.status(400).json({ error: 'Username and password are required' });
     }
 
     // Find user (including suspended/banned users for proper error handling)
     const user = await db.findUserForLogin(username);
-    console.log('User lookup result:', user ? 'Found' : 'Not found');
     if (!user) {
-      console.log('User not found:', username);
-      // Log failed attempt
-      db.logAction(null, 'login_failed', 'user', username, { reason: 'user_not_found' }, clientIP);
+      // Log failed attempt with generic user ID
+      await db.logLoginAttempt(null, false, clientIP, req.get('User-Agent'), 'user_not_found');
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     // Check account status
     if (user.status === 'banned') {
-      console.log('Banned account login attempt:', username);
-      db.logAction(user.id, 'login_failed', 'user', username, { reason: 'account_banned' }, clientIP);
       return res.status(403).json({ error: 'Account banned', accountStatus: 'banned' });
     }
     
     if (user.status === 'suspended') {
-      console.log('Suspended account login attempt:', username);
-      db.logAction(user.id, 'login_failed', 'user', username, { reason: 'account_suspended' }, clientIP);
       return res.status(423).json({ error: 'Account temporarily unavailable', accountStatus: 'suspended' });
     }
 
-    console.log('Verifying password for user:', username);
     // Verify password
     const isValidPassword = await db.verifyPassword(password, user.password);
-    console.log('Password verification result:', isValidPassword);
-    console.log('Stored password hash length:', user.password?.length);
-    console.log('Input password length:', password?.length);
     
     if (!isValidPassword) {
-      console.log('Invalid password for user:', username);
       // Log failed attempt
       await db.logLoginAttempt(user.id, false, clientIP, req.get('User-Agent'), 'invalid_password');
-      db.logAction(user.id, 'login_failed', 'user', username, { reason: 'invalid_password' }, clientIP);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-
-    console.log('Login successful for user:', username);
 
     // Update last login time
     await db.updateLastLogin(user.id);
@@ -94,8 +77,6 @@ router.post('/register', async (req, res) => {
     const { username, email, password, vmIds, role, subscriptionPlan, subscriptionExpiresAt, selectedPlan } = req.body;
     const clientIP = req.ip || req.connection.remoteAddress;
 
-    console.log('Registration attempt:', { username, email, selectedPlan, ip: clientIP });
-
     if (!username || !email || !password) {
       return res.status(400).json({ error: 'Username, email, and password are required' });
     }
@@ -113,8 +94,6 @@ router.post('/register', async (req, res) => {
       subscriptionPlan: finalSubscriptionPlan,
       subscriptionExpiresAt
     });
-
-    console.log('User created successfully:', username);
 
     // Log user creation
     db.logAction(newUser.id, 'user_created', 'user', username, { 

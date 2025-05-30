@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "setup-db": "node scripts/setup-database.js"
+    "setup-db": "node scripts/setup-database.js",
+    "create-admin": "node scripts/create-admin.js",
+    "production": "NODE_ENV=production node index.js"
   },
   "dependencies": {
     "@stripe/react-stripe-js": "^3.7.0",
