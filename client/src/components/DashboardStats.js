@@ -24,8 +24,6 @@ const DashboardStats = ({ stats }) => {
 
     if (daysUntilExpiry < 0) {
       return { text: 'Expired', color: 'text-red-600', bg: 'bg-red-100' };
-    } else if (daysUntilExpiry <= 7) {
-      return { text: 'Expiring Soon', color: 'text-yellow-600', bg: 'bg-yellow-100' };
     } else {
       return { text: 'Active', color: 'text-green-600', bg: 'bg-green-100' };
     }

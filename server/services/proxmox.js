@@ -202,6 +202,200 @@ class ProxmoxService {
       return `${minutes}m`;
     }
   }
+
+  // VM Creation and Cloning Methods
+  async cloneVM(sourceVmid, newVmid, vmName, options = {}) {
+    await this.ensureAuthenticated();
+    try {
+      const cloneParams = {
+        newid: newVmid,
+        name: vmName,
+        full: options.fullClone ? 1 : 0, // 0 for linked clone, 1 for full clone
+        target: this.node,
+        ...options
+      };
+
+      console.log(`Creating ${options.fullClone ? 'full' : 'linked'} clone of VM ${sourceVmid} -> ${newVmid} (${vmName})`);
+      
+      const response = await this.client.post(
+        `/api2/json/nodes/${this.node}/qemu/${sourceVmid}/clone`,
+        cloneParams
+      );
+      
+      return response.data.data;
+    } catch (error) {
+      console.error(`Error cloning VM ${sourceVmid} to ${newVmid}:`, error.message);
+      throw new Error(`Failed to clone VM: ${error.message}`);
+    }
+  }
+
+  async updateVMConfig(vmid, config) {
+    await this.ensureAuthenticated();
+    try {
+      console.log(`Updating VM ${vmid} configuration:`, config);
+      
+      const response = await this.client.put(
+        `/api2/json/nodes/${this.node}/qemu/${vmid}/config`,
+        config
+      );
+      
+      return response.data.data;
+    } catch (error) {
+      console.error(`Error updating VM ${vmid} config:`, error.message);
+      throw new Error(`Failed to update VM config: ${error.message}`);
+    }
+  }
+
+  async getNextAvailableVMID(startRange = 3001, endRange = 3999) {
+    await this.ensureAuthenticated();
+    try {
+      const vms = await this.getVMs();
+      const usedIds = new Set(vms.map(vm => vm.vmid));
+      
+      for (let vmid = startRange; vmid <= endRange; vmid++) {
+        if (!usedIds.has(vmid)) {
+          return vmid;
+        }
+      }
+      
+      throw new Error(`No available VM IDs in range ${startRange}-${endRange}`);
+    } catch (error) {
+      console.error('Error finding next available VM ID:', error.message);
+      throw error;
+    }
+  }
+
+  async waitForTask(taskId, timeout = 300000) {
+    await this.ensureAuthenticated();
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < timeout) {
+      try {
+        const response = await this.client.get(`/api2/json/nodes/${this.node}/tasks/${taskId}/status`);
+        const task = response.data.data;
+        
+        if (task.status === 'stopped') {
+          if (task.exitstatus === 'OK') {
+            return { success: true, task };
+          } else {
+            throw new Error(`Task failed: ${task.exitstatus}`);
+          }
+        }
+        
+        // Wait 2 seconds before checking again
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+      } catch (error) {
+        console.error(`Error checking task ${taskId}:`, error.message);
+        throw error;
+      }
+    }
+    
+    throw new Error(`Task ${taskId} timeout after ${timeout/1000} seconds`);
+  }
+
+  async createVMFromTemplate(templateVmid, userAccountId, vmNumber, planType, vmCount) {
+    try {
+      console.log(`Creating VM for user ${userAccountId}, VM #${vmNumber}, plan: ${planType}`);
+      
+      // Get next available VM ID
+      const newVmid = await this.getNextAvailableVMID();
+      
+      // Generate VM name based on user account ID and VM number
+      const vmName = `${userAccountId}-${String(vmNumber).padStart(2, '0')}`;
+      
+      console.log(`Cloning template ${templateVmid} to VM ${newVmid} (${vmName})`);
+      
+      // Create linked clone
+      const cloneTask = await this.cloneVM(templateVmid, newVmid, vmName, {
+        fullClone: false, // linked clone
+        description: `Auto-created VM for user ${userAccountId} - Plan: ${planType}`
+      });
+      
+      // Wait for clone operation to complete
+      await this.waitForTask(cloneTask);
+      console.log(`Clone operation completed for VM ${newVmid}`);
+      
+      // Configure VM based on plan type
+      const vmConfig = this.getVMConfigForPlan(planType);
+      if (vmConfig && Object.keys(vmConfig).length > 0) {
+        console.log(`Applying plan-specific configuration for ${planType}:`, vmConfig);
+        await this.updateVMConfig(newVmid, vmConfig);
+      }
+      
+      // Start the VM
+      console.log(`Starting VM ${newVmid}`);
+      await this.startVM(newVmid);
+      
+      console.log(`Successfully created and started VM ${newVmid} (${vmName}) for user ${userAccountId}`);
+      
+      return {
+        vmid: newVmid,
+        name: vmName,
+        status: 'created',
+        planType: planType,
+        config: vmConfig
+      };
+      
+    } catch (error) {
+      console.error(`Error creating VM from template for user ${userAccountId}:`, error.message);
+      throw error;
+    }
+  }
+
+  getVMConfigForPlan(planType) {
+    const configs = {
+      'hour_booster': {
+        cores: 2,
+        memory: 4096,
+        description: 'Hour Booster Plan - 2 vCPUs, 4GB RAM'
+      },
+      'dual_mode': {
+        cores: 2,
+        memory: 4096,
+        description: 'Dual Mode Plan - 2 vCPUs, 4GB RAM'
+      },
+      'kd_drop': {
+        cores: 4,
+        memory: 8192,
+        description: 'KD Drop Plan - 4 vCPUs, 8GB RAM'
+      }
+    };
+    
+    return configs[planType] || {};
+  }
+
+  async uploadFileToVM(vmid, localFilePath, remoteFilePath) {
+    // This would require additional setup with file transfer methods
+    // For now, we'll create a placeholder that logs the intended action
+    console.log(`TODO: Upload file ${localFilePath} to VM ${vmid} at ${remoteFilePath}`);
+    
+    // In a real implementation, this might use:
+    // - Proxmox guest agent file transfer
+    // - SCP/SFTP if network access is available
+    // - Shared storage mounting
+    // - CD-ROM ISO with files
+    
+    return { success: true, message: 'File upload queued' };
+  }
+
+  async executeCommandOnVM(vmid, command) {
+    await this.ensureAuthenticated();
+    try {
+      // This requires Proxmox guest agent to be installed on the VM
+      const response = await this.client.post(
+        `/api2/json/nodes/${this.node}/qemu/${vmid}/agent/exec`,
+        {
+          command: Array.isArray(command) ? command : [command]
+        }
+      );
+      
+      return response.data.data;
+    } catch (error) {
+      console.error(`Error executing command on VM ${vmid}:`, error.message);
+      throw new Error(`Failed to execute command on VM: ${error.message}`);
+    }
+  }
 }
 
 module.exports = new ProxmoxService(); 

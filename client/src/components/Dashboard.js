@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
 import VMCard from './VMCard';
+import VMSetup from './VMSetup';
 import DashboardStats from './DashboardStats';
 import ServerOverview from './ServerOverview';
-import { RefreshCw, AlertCircle, Monitor, Loader2, CheckCircle, Clock, Cpu, HardDrive, CreditCard, Server, Users, BarChart3 } from 'lucide-react';
+import { RefreshCw, AlertCircle, Monitor, Loader2, CheckCircle, Clock, Cpu, HardDrive, CreditCard, Server, Users, BarChart3, Settings, Play } from 'lucide-react';
 import SubscriptionManager from './SubscriptionManager';
 import AdminPanel from './AdminPanel';
 import Analytics from './Analytics';
@@ -19,15 +20,39 @@ const Dashboard = () => {
   const [activeTab, setActiveTab] = useState('vms');
   const [serverStats, setServerStats] = useState(null);
   const [actionLoading, setActionLoading] = useState({});
+  const [subscriptionInfo, setSubscriptionInfo] = useState(null);
+  const [setupInfo, setSetupInfo] = useState(null);
+  const [showSetup, setShowSetup] = useState(false);
+  
+  // Add state to prevent API loops
+  const [fetchingVMs, setFetchingVMs] = useState(false);
+  const [fetchingStats, setFetchingStats] = useState(false);
+  const [fetchingServerStats, setFetchingServerStats] = useState(false);
+  const [lastFetchTime, setLastFetchTime] = useState(0);
 
   const fetchVMs = async () => {
+    // Prevent infinite loops - don't fetch if already fetching or fetched recently
+    const now = Date.now();
+    if (fetchingVMs || (now - lastFetchTime < 2000)) { // 2 second minimum between calls
+      console.log('🛑 VM fetch prevented - already in progress or too recent');
+      return;
+    }
+    
     try {
+      setFetchingVMs(true);
       setError('');
+      console.log('🔄 Fetching VMs...');
       const response = await api.get('/vm');
       setVMs(response.data.vms || []);
+      setSubscriptionInfo(response.data.subscription || null);
+      setSetupInfo(response.data.setup || null);
+      setLastFetchTime(now);
+      console.log('✅ VMs fetched successfully');
     } catch (error) {
       console.error('Error fetching VMs:', error);
       setError(error.response?.data?.error || 'Failed to fetch VMs');
+    } finally {
+      setFetchingVMs(false);
     }
   };
 
@@ -94,6 +119,69 @@ const Dashboard = () => {
 
     loadData();
   }, []);
+
+  // Handle URL parameters for payment success/failure
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const tab = urlParams.get('tab');
+    const success = urlParams.get('success');
+    const sessionId = urlParams.get('session_id');
+    const canceled = urlParams.get('canceled');
+
+    // Set active tab if specified in URL
+    if (tab && ['vms', 'subscription', 'admin', 'analytics'].includes(tab)) {
+      setActiveTab(tab);
+    }
+
+    // Handle payment success
+    if (success === 'true' && sessionId) {
+      console.log('🎉 Payment successful, verifying session and refreshing data...');
+      
+      // Set subscription tab as active
+      setActiveTab('subscription');
+      
+      // Verify payment and refresh all data
+      verifyPaymentAndRefresh(sessionId);
+      
+      // Clean up URL without reloading
+      const cleanUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, cleanUrl);
+    }
+
+    // Handle payment cancellation
+    if (canceled === 'true') {
+      console.log('❌ Payment was canceled');
+      setActiveTab('subscription');
+      
+      // Clean up URL
+      const cleanUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, cleanUrl);
+    }
+  }, []);
+
+  // Function to verify payment and refresh subscription data
+  const verifyPaymentAndRefresh = async (sessionId) => {
+    try {
+      console.log('🔍 Verifying payment session:', sessionId);
+      
+      // Call verify endpoint
+      const response = await api.post('/payment/verify-checkout-session', {
+        sessionId: sessionId
+      });
+      
+      if (response.data.success) {
+        console.log('✅ Payment verified successfully');
+        
+        // Single refresh to show updated subscription
+        await handleRefresh();
+        
+        console.log('✅ Payment verification and refresh completed');
+      }
+    } catch (error) {
+      console.error('❌ Error verifying payment:', error);
+      setError('Payment verification failed. Please refresh the page.');
+    }
+  };
 
   const formatBytes = (bytes) => {
     if (!bytes) return '0 B';
@@ -196,10 +284,54 @@ const Dashboard = () => {
         ) : vms.length === 0 ? (
           <div className="p-6 text-center">
             <Monitor className="h-12 w-12 text-gray-400 dark:text-gray-500 mx-auto mb-4 transition-colors duration-200" />
-            <p className="text-gray-500 dark:text-gray-400 transition-colors duration-200">No virtual machines assigned to your account.</p>
-            {user?.role !== 'admin' && (
-              <p className="text-sm text-gray-400 dark:text-gray-500 mt-2 transition-colors duration-200">Contact support to get VMs assigned to your account.</p>
+            <p className="text-gray-500 dark:text-gray-400 transition-colors duration-200">
+              {setupInfo?.message || 'No virtual machines assigned to your account.'}
+            </p>
+            {user?.role !== 'admin' && !subscriptionInfo?.hasActive && (
+              <p className="text-sm text-gray-400 dark:text-gray-500 mt-2 transition-colors duration-200">
+                Purchase a subscription to get started with your VMs.
+              </p>
             )}
+          </div>
+        ) : setupInfo?.required ? (
+          // Show setup wizard when setup is required
+          <div className="p-6">
+            <div className="bg-blue-50 dark:bg-blue-900 border border-blue-200 dark:border-blue-700 rounded-lg p-6 mb-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center">
+                  <Settings className="h-8 w-8 text-blue-600 dark:text-blue-400 mr-3" />
+                  <div>
+                    <h3 className="text-lg font-semibold text-blue-900 dark:text-blue-100">
+                      VM Setup Required
+                    </h3>
+                    <p className="text-blue-800 dark:text-blue-200">
+                      Your {setupInfo.vmCount} VM{setupInfo.vmCount > 1 ? 's are' : ' is'} ready for setup. 
+                      Complete the setup process to start using your VMs.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowSetup(true)}
+                  className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors duration-200"
+                >
+                  <Play className="h-4 w-4 mr-2" />
+                  Start Setup
+                </button>
+              </div>
+            </div>
+            
+            {/* Show VMs grid below setup message */}
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+              {vms.map((vm) => (
+                <VMCard
+                  key={vm.vmid}
+                  vm={vm}
+                  onAction={handleVMAction}
+                  actionLoading={actionLoading}
+                  subscriptionInfo={subscriptionInfo}
+                />
+              ))}
+            </div>
           </div>
         ) : (
           <div className="p-6">
@@ -210,6 +342,7 @@ const Dashboard = () => {
                   vm={vm}
                   onAction={handleVMAction}
                   actionLoading={actionLoading}
+                  subscriptionInfo={subscriptionInfo}
                 />
               ))}
             </div>
@@ -286,6 +419,34 @@ const Dashboard = () => {
       {activeTab === 'subscription' && <SubscriptionManager />}
       {activeTab === 'admin' && <AdminPanel />}
       {activeTab === 'analytics' && <Analytics />}
+
+      {/* VM Setup Modal */}
+      {showSetup && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                VM Setup Wizard
+              </h2>
+              <button
+                onClick={() => setShowSetup(false)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors duration-200"
+              >
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <VMSetup 
+              setupInfo={setupInfo} 
+              onComplete={() => {
+                setShowSetup(false);
+                handleRefresh(); // Refresh to update VM status
+              }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

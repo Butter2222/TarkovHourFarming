@@ -56,6 +56,51 @@ const Login = () => {
       return;
     }
 
+    // Email validation - check for real email format and domain
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(formData.email)) {
+      setError('Please enter a valid email address');
+      setLoading(false);
+      return;
+    }
+
+    // Check for common disposable email domains
+    const disposableDomains = [
+      '10minutemail.com', 'tempmail.org', 'guerrillamail.com', 'mailinator.com',
+      'yopmail.com', 'throwaway.email', 'temp-mail.org', 'getnada.com',
+      'maildrop.cc', 'sharklasers.com', 'guerrillamailblock.com', 'pokemail.net',
+      'spam4.me', 'bccto.me', 'chacuo.net', 'dispostable.com', 'spambox.us',
+      'tempail.com', 'tempmailaddress.com', '20minutemail.it', 'emailondeck.com',
+      'temp.com', 'test.com', 'example.com', 'fake.com', 'dummy.com',
+      'sample.com', 'testing.com', 'demo.com', 'localhost.com', 'invalid.com',
+      'notreal.com', 'fakemail.com', 'testmail.com', 'tempuser.com', 'nomail.com',
+      'temporary.com', 'disposable.com', 'throwaway.com', 'junk.com', 'trash.com'
+    ];
+    
+    const emailDomain = formData.email.split('@')[1]?.toLowerCase();
+    if (disposableDomains.includes(emailDomain)) {
+      setError('Please use a real email address, not a temporary or disposable email');
+      setLoading(false);
+      return;
+    }
+
+    // Additional check for common real email domains (whitelist approach)
+    const commonRealDomains = [
+      'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'aol.com',
+      'icloud.com', 'protonmail.com', 'live.com', 'msn.com', 'yandex.com',
+      'mail.com', 'zoho.com', 'fastmail.com', 'tutanota.com', 'inbox.com',
+      'yahoo.co.uk', 'yahoo.ca', 'yahoo.com.au', 'gmail.co.uk', 'hotmail.co.uk',
+      'outlook.co.uk', 'live.co.uk', 'btinternet.com', 'virginmedia.com',
+      'sky.com', 'talktalk.net', 'tiscali.co.uk', 'ntlworld.com'
+    ];
+    
+    // If it's not a common real domain, reject it for security
+    if (!commonRealDomains.includes(emailDomain)) {
+      setError('Please use a real email address from a recognized email provider (Gmail, Yahoo, Outlook, etc.)');
+      setLoading(false);
+      return;
+    }
+
     try {
       const response = await fetch('/api/auth/register', {
         method: 'POST',
@@ -101,19 +146,13 @@ const Login = () => {
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col justify-center py-12 sm:px-6 lg:px-8 transition-colors duration-200">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="text-center">
+        <div className="text-center mb-8">
           <div className="mx-auto h-12 w-12 bg-primary-600 dark:bg-primary-500 rounded-lg flex items-center justify-center transition-colors duration-200">
             <Monitor className="h-8 w-8 text-white" />
           </div>
           <h2 className="mt-6 text-3xl font-bold text-gray-900 dark:text-white transition-colors duration-200">
             {isRegistering ? 'Create Account' : 'VM Dashboard'}
           </h2>
-          <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 transition-colors duration-200">
-            {isRegistering 
-              ? 'Sign up to start boosting your Tarkov hours' 
-              : 'Sign in to manage your virtual machines'
-            }
-          </p>
         </div>
 
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 transition-colors duration-200 border dark:border-gray-700">

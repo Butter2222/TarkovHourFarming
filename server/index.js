@@ -11,6 +11,10 @@ const vmRoutes = require('./routes/vm');
 const userRoutes = require('./routes/user');
 const paymentRoutes = require('./routes/payment');
 const adminRoutes = require('./routes/admin');
+const db = require('./services/database');
+
+// Initialize subscription manager for automatic VM shutdown on expired subscriptions
+require('./services/subscriptionManager');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -50,22 +54,34 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// CORS configuration for production
+// CORS configuration with dev/prod separation
 const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (mobile apps, etc.)
     if (!origin) return callback(null, true);
     
-    // In production, only allow your domain
+    // In development, allow localhost origins
+    if (process.env.NODE_ENV === 'development') {
+      if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+        return callback(null, true);
+      }
+    }
+    
+    // Production allowed origins (from environment variables)
     const allowedOrigins = [
-      process.env.CORS_ORIGIN,
-      process.env.FRONTEND_URL,
-      'https://your-domain.com' // Replace with your actual domain
+      process.env.CORS_ORIGIN,      // e.g., https://vm.mwpriv.com
+      process.env.FRONTEND_URL      // backup frontend URL if different
     ].filter(Boolean);
+    
+    // In development, also allow localhost origins
+    if (process.env.NODE_ENV === 'development') {
+      allowedOrigins.push('http://localhost:3000', 'http://127.0.0.1:3000');
+    }
     
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
+      console.log(`CORS blocked origin: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -77,6 +93,8 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 // Body parsing middleware
+// Special handling for Stripe webhook - needs raw body
+app.use('/api/payment/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 

@@ -13,7 +13,17 @@ class DatabaseService {
     
     const dbPath = path.join(dataDir, 'database.db');
     this.db = new Database(dbPath);
+    
+    // Configure SQLite for better performance and stability
     this.db.pragma('foreign_keys = ON');
+    this.db.pragma('journal_mode = WAL'); // Write-Ahead Logging for better concurrency
+    this.db.pragma('synchronous = NORMAL'); // Balance between safety and performance
+    this.db.pragma('cache_size = 1000'); // Increase cache size
+    this.db.pragma('temp_store = memory'); // Store temp tables in memory
+    this.db.pragma('mmap_size = 268435456'); // Use memory-mapped I/O (256MB)
+    
+    // Set a busy timeout to prevent immediate failures on lock
+    this.db.pragma('busy_timeout = 5000'); // 5 seconds
     
     // Create tables if they don't exist
     this.db.exec(`
@@ -45,13 +55,15 @@ class DatabaseService {
       CREATE TABLE IF NOT EXISTS audit_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
+        performed_by_user_id INTEGER,
         action TEXT NOT NULL,
         resource_type TEXT,
         resource_id TEXT,
         details TEXT, -- JSON data
         ip_address TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL,
+        FOREIGN KEY (performed_by_user_id) REFERENCES users (id) ON DELETE SET NULL
       );
 
       CREATE TABLE IF NOT EXISTS sessions (
@@ -64,6 +76,137 @@ class DatabaseService {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
       );
+
+      -- Payment tracking tables
+      CREATE TABLE IF NOT EXISTS payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        stripe_payment_intent_id TEXT UNIQUE,
+        stripe_checkout_session_id TEXT,
+        stripe_subscription_id TEXT,
+        stripe_customer_id TEXT,
+        amount INTEGER NOT NULL, -- Amount in cents
+        currency TEXT DEFAULT 'usd',
+        status TEXT NOT NULL, -- pending, succeeded, failed, canceled, refunded
+        payment_method TEXT, -- card, bank_transfer, etc
+        plan_id TEXT, -- basic, premium
+        plan_name TEXT,
+        metadata TEXT, -- JSON data
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS payment_attempts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        payment_id INTEGER,
+        user_id INTEGER NOT NULL,
+        stripe_payment_intent_id TEXT,
+        amount INTEGER NOT NULL,
+        currency TEXT DEFAULT 'usd',
+        status TEXT NOT NULL, -- requires_payment_method, requires_confirmation, requires_action, processing, succeeded, requires_capture, canceled
+        failure_code TEXT, -- card_declined, insufficient_funds, etc
+        failure_message TEXT,
+        payment_method_id TEXT,
+        last_payment_error TEXT, -- JSON data
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (payment_id) REFERENCES payments (id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS refunds (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        payment_id INTEGER,
+        user_id INTEGER NOT NULL,
+        stripe_refund_id TEXT UNIQUE NOT NULL,
+        stripe_payment_intent_id TEXT NOT NULL,
+        amount INTEGER NOT NULL, -- Amount refunded in cents
+        currency TEXT DEFAULT 'usd',
+        reason TEXT, -- duplicate, fraudulent, requested_by_customer
+        status TEXT NOT NULL, -- pending, succeeded, failed, canceled
+        failure_reason TEXT,
+        metadata TEXT, -- JSON data
+        admin_user_id INTEGER, -- Who processed the refund
+        admin_reason TEXT, -- Admin's reason for refund
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (payment_id) REFERENCES payments (id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+        FOREIGN KEY (admin_user_id) REFERENCES users (id) ON DELETE SET NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS stripe_webhooks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        stripe_event_id TEXT UNIQUE NOT NULL,
+        event_type TEXT NOT NULL, -- payment_intent.succeeded, customer.subscription.updated, etc
+        object_id TEXT, -- The ID of the object (payment intent, subscription, etc)
+        user_id INTEGER, -- Associated user if applicable
+        raw_data TEXT NOT NULL, -- Full JSON webhook data
+        processed BOOLEAN DEFAULT FALSE,
+        processing_error TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        processed_at DATETIME,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS payment_disputes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        payment_id INTEGER,
+        user_id INTEGER NOT NULL,
+        stripe_dispute_id TEXT UNIQUE NOT NULL,
+        stripe_charge_id TEXT NOT NULL,
+        amount INTEGER NOT NULL, -- Disputed amount in cents
+        currency TEXT DEFAULT 'usd',
+        reason TEXT, -- duplicate, fraudulent, subscription_canceled, etc
+        status TEXT NOT NULL, -- warning_needs_response, warning_under_review, warning_closed, needs_response, under_review, charge_refunded, won, lost
+        evidence_deadline INTEGER, -- Unix timestamp
+        is_charge_refundable BOOLEAN,
+        metadata TEXT, -- JSON data
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (payment_id) REFERENCES payments (id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+      );
+
+      -- Indexes for better performance
+      CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id);
+      CREATE INDEX IF NOT EXISTS idx_payments_stripe_payment_intent_id ON payments(stripe_payment_intent_id);
+      CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
+      CREATE INDEX IF NOT EXISTS idx_payments_created_at ON payments(created_at);
+      
+      CREATE INDEX IF NOT EXISTS idx_payment_attempts_payment_id ON payment_attempts(payment_id);
+      CREATE INDEX IF NOT EXISTS idx_payment_attempts_user_id ON payment_attempts(user_id);
+      CREATE INDEX IF NOT EXISTS idx_payment_attempts_status ON payment_attempts(status);
+      
+      CREATE INDEX IF NOT EXISTS idx_refunds_payment_id ON refunds(payment_id);
+      CREATE INDEX IF NOT EXISTS idx_refunds_user_id ON refunds(user_id);
+      CREATE INDEX IF NOT EXISTS idx_refunds_stripe_refund_id ON refunds(stripe_refund_id);
+      
+      CREATE INDEX IF NOT EXISTS idx_stripe_webhooks_event_id ON stripe_webhooks(stripe_event_id);
+      CREATE INDEX IF NOT EXISTS idx_stripe_webhooks_event_type ON stripe_webhooks(event_type);
+      CREATE INDEX IF NOT EXISTS idx_stripe_webhooks_processed ON stripe_webhooks(processed);
+      
+      CREATE INDEX IF NOT EXISTS idx_payment_disputes_user_id ON payment_disputes(user_id);
+      CREATE INDEX IF NOT EXISTS idx_payment_disputes_status ON payment_disputes(status);
+
+      -- VM Setup tracking table
+      CREATE TABLE IF NOT EXISTS vm_setup (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        plan_type TEXT NOT NULL, -- hour_booster, dual_mode, kd_drop
+        vm_count INTEGER NOT NULL,
+        vm_ids TEXT, -- JSON array of VM IDs
+        status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'setup_in_progress', 'file_uploaded', 'completed', 'failed')),
+        setup_data TEXT, -- JSON data for setup progress
+        hwho_file_path TEXT, -- Path to uploaded hwho.dat file
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        completed_at DATETIME,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vm_setup_user_id ON vm_setup(user_id);
+      CREATE INDEX IF NOT EXISTS idx_vm_setup_status ON vm_setup(status);
     `);
     
     // Ensure status column exists (migration for existing databases)
@@ -74,6 +217,17 @@ class DatabaseService {
       // Column probably already exists
       if (!error.message.includes('duplicate column name')) {
         console.error('❌ Error adding status column:', error);
+      }
+    }
+    
+    // Ensure subscription_data column exists (migration for existing databases)
+    try {
+      this.db.exec(`ALTER TABLE users ADD COLUMN subscription_data TEXT`);
+      console.log('✅ Added subscription_data column to users table');
+    } catch (error) {
+      // Column probably already exists
+      if (!error.message.includes('duplicate column name')) {
+        console.error('❌ Error adding subscription_data column:', error);
       }
     }
     
@@ -90,6 +244,17 @@ class DatabaseService {
       console.log('✅ Migrated existing users to status system');
     } catch (error) {
       console.error('❌ Error migrating user statuses:', error);
+    }
+    
+    // Ensure performed_by_user_id column exists in audit_logs (migration for existing databases)
+    try {
+      this.db.exec(`ALTER TABLE audit_logs ADD COLUMN performed_by_user_id INTEGER REFERENCES users (id) ON DELETE SET NULL`);
+      console.log('✅ Added performed_by_user_id column to audit_logs table');
+    } catch (error) {
+      // Column probably already exists
+      if (!error.message.includes('duplicate column name')) {
+        console.error('❌ Error adding performed_by_user_id column:', error);
+      }
     }
     
     // Prepare common statements
@@ -161,8 +326,8 @@ class DatabaseService {
       
       // Audit logging
       addAuditLog: this.db.prepare(`
-        INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details, ip_address)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO audit_logs (user_id, performed_by_user_id, action, resource_type, resource_id, details, ip_address)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `),
       
       // Session management
@@ -202,6 +367,177 @@ class DatabaseService {
         LEFT JOIN vm_assignments va ON u.id = va.user_id
         WHERE u.id = ?
         GROUP BY u.id
+      `),
+
+      // User operations
+      getUserByUsername: this.db.prepare('SELECT * FROM users WHERE username = ?'),
+      getUserByEmail: this.db.prepare('SELECT * FROM users WHERE email = ?'),
+      getUserById: this.db.prepare('SELECT * FROM users WHERE id = ?'),
+      updateUser: this.db.prepare('UPDATE users SET email = ?, role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'),
+      deleteUser: this.db.prepare('DELETE FROM users WHERE id = ?'),
+      updateUserPassword: this.db.prepare('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'),
+      updateUserLastLogin: this.db.prepare('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?'),
+      
+      // VM assignments
+      getUserVMs: this.db.prepare('SELECT vm_id FROM vm_assignments WHERE user_id = ?'),
+      clearUserVMs: this.db.prepare('DELETE FROM vm_assignments WHERE user_id = ?'),
+      
+      // Subscription operations
+      updateUserSubscription: this.db.prepare(`
+        UPDATE users SET 
+          subscription_plan = ?, 
+          subscription_expires_at = ?, 
+          subscription_data = ?,
+          updated_at = CURRENT_TIMESTAMP 
+        WHERE id = ?
+      `),
+      
+      // Payment operations
+      insertPayment: this.db.prepare(`
+        INSERT INTO payments (
+          user_id, stripe_payment_intent_id, stripe_checkout_session_id, stripe_subscription_id, 
+          stripe_customer_id, amount, currency, status, payment_method, plan_id, plan_name, metadata
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `),
+
+      updatePayment: this.db.prepare(`
+        UPDATE payments SET 
+          status = ?, payment_method = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP 
+        WHERE id = ?
+      `),
+
+      getPaymentById: this.db.prepare('SELECT * FROM payments WHERE id = ?'),
+      getPaymentByStripeId: this.db.prepare('SELECT * FROM payments WHERE stripe_payment_intent_id = ?'),
+      getPaymentsByUser: this.db.prepare(`
+        SELECT * FROM payments WHERE user_id = ? 
+        ORDER BY created_at DESC LIMIT ? OFFSET ?
+      `),
+
+      // Payment attempts
+      insertPaymentAttempt: this.db.prepare(`
+        INSERT INTO payment_attempts (
+          payment_id, user_id, stripe_payment_intent_id, amount, currency, status, 
+          failure_code, failure_message, payment_method_id, last_payment_error
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `),
+
+      getPaymentAttempts: this.db.prepare(`
+        SELECT * FROM payment_attempts WHERE payment_id = ? ORDER BY created_at DESC
+      `),
+
+      // Refunds
+      insertRefund: this.db.prepare(`
+        INSERT INTO refunds (
+          payment_id, user_id, stripe_refund_id, stripe_payment_intent_id, amount, 
+          currency, reason, status, metadata, admin_user_id, admin_reason
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `),
+
+      updateRefund: this.db.prepare(`
+        UPDATE refunds SET 
+          status = ?, failure_reason = ?, updated_at = CURRENT_TIMESTAMP 
+        WHERE stripe_refund_id = ?
+      `),
+
+      getRefundsByUser: this.db.prepare(`
+        SELECT r.*, p.plan_name, p.amount as original_amount 
+        FROM refunds r 
+        LEFT JOIN payments p ON r.payment_id = p.id 
+        WHERE r.user_id = ? 
+        ORDER BY r.created_at DESC
+      `),
+
+      getRefundByStripeId: this.db.prepare('SELECT * FROM refunds WHERE stripe_refund_id = ?'),
+
+      // Webhooks
+      insertWebhook: this.db.prepare(`
+        INSERT INTO stripe_webhooks (
+          stripe_event_id, event_type, object_id, user_id, raw_data
+        ) VALUES (?, ?, ?, ?, ?)
+      `),
+
+      updateWebhookProcessed: this.db.prepare(`
+        UPDATE stripe_webhooks SET 
+          processed = TRUE, processed_at = CURRENT_TIMESTAMP, processing_error = ? 
+        WHERE stripe_event_id = ?
+      `),
+
+      getUnprocessedWebhooks: this.db.prepare(`
+        SELECT * FROM stripe_webhooks WHERE processed = FALSE ORDER BY created_at ASC
+      `),
+
+      getWebhookByEventId: this.db.prepare('SELECT * FROM stripe_webhooks WHERE stripe_event_id = ?'),
+
+      // Disputes
+      insertDispute: this.db.prepare(`
+        INSERT INTO payment_disputes (
+          payment_id, user_id, stripe_dispute_id, stripe_charge_id, amount, currency, 
+          reason, status, evidence_deadline, is_charge_refundable, metadata
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `),
+
+      updateDispute: this.db.prepare(`
+        UPDATE payment_disputes SET 
+          status = ?, metadata = ?, updated_at = CURRENT_TIMESTAMP 
+        WHERE stripe_dispute_id = ?
+      `),
+
+      getDisputesByUser: this.db.prepare(`
+        SELECT * FROM payment_disputes WHERE user_id = ? ORDER BY created_at DESC
+      `),
+
+      // Analytics queries
+      getPaymentStats: this.db.prepare(`
+        SELECT 
+          COUNT(*) as total_payments,
+          SUM(CASE WHEN status = 'succeeded' THEN amount ELSE 0 END) as total_revenue,
+          SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) as successful_payments,
+          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed_payments,
+          AVG(CASE WHEN status = 'succeeded' THEN amount ELSE NULL END) as avg_payment_amount
+        FROM payments 
+        WHERE created_at >= date('now', '-30 days')
+      `),
+
+      getRevenueByPlan: this.db.prepare(`
+        SELECT 
+          plan_id,
+          COUNT(*) as payment_count,
+          SUM(amount) as total_revenue
+        FROM payments 
+        WHERE status = 'succeeded' AND created_at >= date('now', '-30 days')
+        GROUP BY plan_id
+      `),
+
+      // VM Setup operations
+      insertVMSetup: this.db.prepare(`
+        INSERT INTO vm_setup (user_id, plan_type, vm_count, vm_ids, status, setup_data)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `),
+
+      updateVMSetupStatus: this.db.prepare(`
+        UPDATE vm_setup SET 
+          status = ?, setup_data = ?, updated_at = CURRENT_TIMESTAMP 
+        WHERE user_id = ? AND status != 'completed'
+      `),
+
+      updateVMSetupFile: this.db.prepare(`
+        UPDATE vm_setup SET 
+          hwho_file_path = ?, status = ?, setup_data = ?, updated_at = CURRENT_TIMESTAMP 
+        WHERE user_id = ? AND status != 'completed'
+      `),
+
+      completeVMSetup: this.db.prepare(`
+        UPDATE vm_setup SET 
+          status = 'completed', setup_data = ?, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP 
+        WHERE user_id = ? AND status != 'completed'
+      `),
+
+      getVMSetupByUser: this.db.prepare(`
+        SELECT * FROM vm_setup WHERE user_id = ? ORDER BY created_at DESC LIMIT 1
+      `),
+
+      getActiveVMSetup: this.db.prepare(`
+        SELECT * FROM vm_setup WHERE user_id = ? AND status != 'completed' ORDER BY created_at DESC LIMIT 1
       `)
     };
   }
@@ -367,6 +703,11 @@ class DatabaseService {
     return rows.map(row => row.vm_id);
   }
   
+  // Alias for subscription manager compatibility
+  getUserVMs(userId) {
+    return this.getUserVMIds(userId);
+  }
+  
   canAccessVM(userId, vmId) {
     const user = this.statements.findUserById.get(userId);
     if (!user) return false;
@@ -380,10 +721,11 @@ class DatabaseService {
   }
   
   // Audit logging
-  logAction(userId, action, resourceType = null, resourceId = null, details = null, ipAddress = null) {
+  logAction(userId, action, resourceType = null, resourceId = null, details = null, ipAddress = null, performedByUserId = null) {
     try {
       this.statements.addAuditLog.run(
         userId,
+        performedByUserId || userId, // Use performedByUserId if provided, otherwise use userId as fallback
         action,
         resourceType,
         resourceId,
@@ -659,6 +1001,41 @@ class DatabaseService {
     }
   }
 
+  async deleteUserWithAudit(userId, auditDetails, ipAddress) {
+    try {
+      // Use a transaction to ensure atomicity
+      const transaction = this.db.transaction(() => {
+        // First log the action while the user still exists
+        this.statements.addAuditLog.run(
+          userId,
+          userId, // performed_by_user_id - user is deleting their own account
+          'account_deleted',
+          'account',
+          userId,
+          JSON.stringify(auditDetails),
+          ipAddress
+        );
+        
+        // Then delete the user (VM assignments will be deleted automatically due to foreign key)
+        const deleteStmt = this.db.prepare(`
+          DELETE FROM users WHERE id = ?
+        `);
+        
+        const result = deleteStmt.run(userId);
+        if (result.changes === 0) {
+          throw new Error('User not found or already deleted');
+        }
+        
+        return result.changes > 0;
+      });
+      
+      return transaction();
+    } catch (error) {
+      console.error('Error deleting user with audit:', error);
+      throw error;
+    }
+  }
+
   async getUserAuditLogs(userId, limit = 50) {
     try {
       const stmt = this.db.prepare(`
@@ -774,7 +1151,7 @@ class DatabaseService {
   // New comprehensive analytics methods
   async getAnalytics() {
     try {
-      // User Growth Analytics
+      // User Growth Analytics - Fixed to ensure unique users per day
       const userGrowthStmt = this.db.prepare(`
         SELECT 
           date(created_at) as date,
@@ -805,15 +1182,30 @@ class DatabaseService {
         GROUP BY status
       `);
 
-      // Subscription Analytics
+      // Subscription Analytics - Updated to group new plan types properly
       const subscriptionAnalyticsStmt = this.db.prepare(`
         SELECT 
-          subscription_plan,
+          CASE 
+            WHEN subscription_plan LIKE '%Hour Booster%' OR subscription_plan LIKE '%hour_booster%' THEN 'Hour Booster'
+            WHEN subscription_plan LIKE '%KD Drop%' OR subscription_plan LIKE '%kd_drop%' THEN 'KD Drop'
+            WHEN subscription_plan LIKE '%Dual Mode%' OR subscription_plan LIKE '%dual_mode%' THEN 'Dual Mode'
+            WHEN subscription_plan = 'Basic' THEN 'Hour Booster'
+            WHEN subscription_plan = 'Premium' THEN 'KD Drop'
+            ELSE subscription_plan
+          END as subscription_plan,
           COUNT(*) as count,
           COUNT(CASE WHEN subscription_expires_at > datetime('now') THEN 1 END) as active_count
         FROM users
         WHERE subscription_plan IS NOT NULL AND subscription_plan != 'none'
-        GROUP BY subscription_plan
+        GROUP BY CASE 
+          WHEN subscription_plan LIKE '%Hour Booster%' OR subscription_plan LIKE '%hour_booster%' THEN 'Hour Booster'
+          WHEN subscription_plan LIKE '%KD Drop%' OR subscription_plan LIKE '%kd_drop%' THEN 'KD Drop'
+          WHEN subscription_plan LIKE '%Dual Mode%' OR subscription_plan LIKE '%dual_mode%' THEN 'Dual Mode'
+          WHEN subscription_plan = 'Basic' THEN 'Hour Booster'
+          WHEN subscription_plan = 'Premium' THEN 'KD Drop'
+          ELSE subscription_plan
+        END
+        ORDER BY count DESC
       `);
 
       // VM Assignment Analytics
@@ -827,7 +1219,7 @@ class DatabaseService {
         GROUP BY u.role
       `);
 
-      // Recent Activity Analytics
+      // Recent Activity Analytics - Filtered to exclude server overview access
       const recentActivityStmt = this.db.prepare(`
         SELECT 
           action,
@@ -836,6 +1228,11 @@ class DatabaseService {
           datetime(MAX(created_at)) as last_occurrence
         FROM audit_logs 
         WHERE created_at >= datetime('now', '-7 days')
+          AND action NOT LIKE '%server_overview%'
+          AND action NOT LIKE '%server-overview%'
+          AND action != 'access_server_overview'
+          AND action != 'view_server_overview'
+          AND action != 'fetch_server_overview'
         GROUP BY action, resource_type
         ORDER BY count DESC
         LIMIT 10
@@ -1296,6 +1693,451 @@ class DatabaseService {
       vmIds: user.vm_ids ? user.vm_ids.split(',').map(Number) : [],
       subscription
     };
+  }
+
+  // Payment Methods
+  async recordPayment(paymentData) {
+    try {
+      console.log('💾 Recording payment:', {
+        userId: paymentData.userId,
+        stripePaymentIntentId: paymentData.stripePaymentIntentId,
+        stripeCheckoutSessionId: paymentData.stripeCheckoutSessionId,
+        amount: paymentData.amount,
+        status: paymentData.status
+      });
+
+      // Check for duplicates by multiple fields to prevent webhook + client verification duplicates
+      let existingPayment = null;
+
+      // First check by payment intent ID (most reliable)
+      if (paymentData.stripePaymentIntentId) {
+        existingPayment = this.statements.getPaymentByStripeId.get(paymentData.stripePaymentIntentId);
+        if (existingPayment) {
+          console.log('⚠️ Payment already exists by payment intent ID:', existingPayment.id);
+          return existingPayment.id;
+        }
+      }
+
+      // Then check by checkout session ID
+      if (paymentData.stripeCheckoutSessionId) {
+        const sessionPayment = this.db.prepare(`
+          SELECT * FROM payments WHERE stripe_checkout_session_id = ?
+        `).get(paymentData.stripeCheckoutSessionId);
+        
+        if (sessionPayment) {
+          console.log('⚠️ Payment already exists by checkout session ID:', sessionPayment.id);
+          return sessionPayment.id;
+        }
+      }
+
+      // Check for duplicate by user + amount + recent timeframe (last 5 minutes) to catch edge cases
+      const recentDuplicate = this.db.prepare(`
+        SELECT * FROM payments 
+        WHERE user_id = ? AND amount = ? AND status = 'succeeded' 
+        AND created_at > datetime('now', '-5 minutes')
+        ORDER BY created_at DESC LIMIT 1
+      `).get(paymentData.userId, paymentData.amount);
+
+      if (recentDuplicate) {
+        console.log('⚠️ Potential duplicate payment detected (same user, amount, recent):', recentDuplicate.id);
+        // Only skip if it has the same payment intent or session ID
+        if (paymentData.stripePaymentIntentId && recentDuplicate.stripe_payment_intent_id === paymentData.stripePaymentIntentId) {
+          console.log('⚠️ Confirmed duplicate by payment intent, skipping');
+          return recentDuplicate.id;
+        }
+        if (paymentData.stripeCheckoutSessionId && recentDuplicate.stripe_checkout_session_id === paymentData.stripeCheckoutSessionId) {
+          console.log('⚠️ Confirmed duplicate by session ID, skipping');
+          return recentDuplicate.id;
+        }
+      }
+
+      console.log('✅ No duplicate found, creating new payment record');
+
+      const result = this.statements.insertPayment.run(
+        paymentData.userId,
+        paymentData.stripePaymentIntentId || null,
+        paymentData.stripeCheckoutSessionId || null,
+        paymentData.stripeSubscriptionId || null,
+        paymentData.stripeCustomerId || null,
+        paymentData.amount,
+        paymentData.currency || 'usd',
+        paymentData.status,
+        paymentData.paymentMethod || null,
+        paymentData.planId || null,
+        paymentData.planName || null,
+        paymentData.metadata ? JSON.stringify(paymentData.metadata) : null
+      );
+
+      // Log the payment recording
+      this.logAction(
+        paymentData.userId,
+        'payment_recorded',
+        'payment',
+        result.lastInsertRowid.toString(),
+        {
+          amount: paymentData.amount,
+          currency: paymentData.currency,
+          status: paymentData.status,
+          plan: paymentData.planName,
+          source: paymentData.metadata?.verificationMethod || 'webhook'
+        },
+        'system',
+        paymentData.performedBy || paymentData.userId
+      );
+
+      console.log('✅ Payment recorded successfully with ID:', result.lastInsertRowid);
+      return result.lastInsertRowid;
+    } catch (error) {
+      console.error('❌ Error recording payment:', error);
+      throw error;
+    }
+  }
+
+  async updatePaymentStatus(paymentId, status, paymentMethod = null, metadata = null) {
+    try {
+      const result = this.statements.updatePayment.run(
+        status,
+        paymentMethod,
+        metadata ? JSON.stringify(metadata) : null,
+        paymentId
+      );
+
+      return result.changes > 0;
+    } catch (error) {
+      console.error('Error updating payment status:', error);
+      throw error;
+    }
+  }
+
+  async getPaymentHistory(userId, limit = 50, offset = 0) {
+    try {
+      const payments = this.statements.getPaymentsByUser.all(userId, limit, offset);
+      
+      // Parse metadata for each payment
+      return payments.map(payment => ({
+        ...payment,
+        metadata: payment.metadata ? JSON.parse(payment.metadata) : null,
+        amountFormatted: `$${(payment.amount / 100).toFixed(2)}`
+      }));
+    } catch (error) {
+      console.error('Error getting payment history:', error);
+      throw error;
+    }
+  }
+
+  async recordPaymentAttempt(attemptData) {
+    try {
+      const result = this.statements.insertPaymentAttempt.run(
+        attemptData.paymentId || null,
+        attemptData.userId,
+        attemptData.stripePaymentIntentId || null,
+        attemptData.amount,
+        attemptData.currency || 'usd',
+        attemptData.status,
+        attemptData.failureCode || null,
+        attemptData.failureMessage || null,
+        attemptData.paymentMethodId || null,
+        attemptData.lastPaymentError ? JSON.stringify(attemptData.lastPaymentError) : null
+      );
+
+      return result.lastInsertRowid;
+    } catch (error) {
+      console.error('Error recording payment attempt:', error);
+      throw error;
+    }
+  }
+
+  async recordRefund(refundData) {
+    try {
+      const result = this.statements.insertRefund.run(
+        refundData.paymentId || null,
+        refundData.userId,
+        refundData.stripeRefundId,
+        refundData.stripePaymentIntentId,
+        refundData.amount,
+        refundData.currency || 'usd',
+        refundData.reason || 'requested_by_customer',
+        refundData.status,
+        refundData.metadata ? JSON.stringify(refundData.metadata) : null,
+        refundData.adminUserId || null,
+        refundData.adminReason || null
+      );
+
+      // Log the refund
+      this.logAction(
+        refundData.userId,
+        'refund_recorded',
+        'refund',
+        refundData.stripeRefundId,
+        {
+          amount: refundData.amount,
+          reason: refundData.reason,
+          adminReason: refundData.adminReason
+        },
+        'system',
+        refundData.adminUserId || refundData.userId
+      );
+
+      return result.lastInsertRowid;
+    } catch (error) {
+      console.error('Error recording refund:', error);
+      throw error;
+    }
+  }
+
+  async recordWebhook(webhookData) {
+    try {
+      const existing = this.statements.getWebhookByEventId.get(webhookData.stripeEventId);
+      if (existing) {
+        console.log(`Webhook ${webhookData.stripeEventId} already processed, skipping`);
+        return existing.id;
+      }
+
+      const result = this.statements.insertWebhook.run(
+        webhookData.stripeEventId,
+        webhookData.eventType,
+        webhookData.objectId || null,
+        webhookData.userId || null,
+        JSON.stringify(webhookData.rawData)
+      );
+
+      return result.lastInsertRowid;
+    } catch (error) {
+      console.error('Error recording webhook:', error);
+      throw error;
+    }
+  }
+
+  async markWebhookProcessed(eventId, error = null) {
+    try {
+      const result = this.statements.updateWebhookProcessed.run(
+        error ? error.message : null,
+        eventId
+      );
+      return result.changes > 0;
+    } catch (error) {
+      console.error('Error marking webhook as processed:', error);
+      throw error;
+    }
+  }
+
+  async getPaymentAnalytics() {
+    try {
+      const stats = this.statements.getPaymentStats.get();
+      const revenueByPlan = this.statements.getRevenueByPlan.all();
+
+      return {
+        stats: {
+          ...stats,
+          totalRevenueFormatted: `$${((stats.total_revenue || 0) / 100).toFixed(2)}`,
+          avgPaymentAmountFormatted: `$${((stats.avg_payment_amount || 0) / 100).toFixed(2)}`,
+          successRate: stats.total_payments > 0 ? ((stats.successful_payments / stats.total_payments) * 100).toFixed(1) : 0
+        },
+        revenueByPlan: revenueByPlan.map(plan => ({
+          ...plan,
+          totalRevenueFormatted: `$${(plan.total_revenue / 100).toFixed(2)}`,
+          avgRevenuePerPayment: `$${(plan.total_revenue / plan.payment_count / 100).toFixed(2)}`
+        }))
+      };
+    } catch (error) {
+      console.error('Error getting payment analytics:', error);
+      throw error;
+    }
+  }
+
+  async getUserRefunds(userId) {
+    try {
+      const refunds = this.statements.getRefundsByUser.all(userId);
+      
+      return refunds.map(refund => ({
+        ...refund,
+        metadata: refund.metadata ? JSON.parse(refund.metadata) : null,
+        amountFormatted: `$${(refund.amount / 100).toFixed(2)}`,
+        originalAmountFormatted: `$${((refund.original_amount || 0) / 100).toFixed(2)}`
+      }));
+    } catch (error) {
+      console.error('Error getting user refunds:', error);
+      throw error;
+    }
+  }
+
+  async cleanupDuplicatePayments() {
+    try {
+      console.log('🧹 Starting duplicate payment cleanup...');
+      
+      // Find duplicates by payment_intent_id
+      const duplicates = this.db.prepare(`
+        SELECT stripe_payment_intent_id, COUNT(*) as count, MIN(id) as keep_id
+        FROM payments 
+        WHERE stripe_payment_intent_id IS NOT NULL 
+        GROUP BY stripe_payment_intent_id 
+        HAVING count > 1
+      `).all();
+
+      console.log(`🔍 Found ${duplicates.length} sets of duplicate payments`);
+
+      let totalDeleted = 0;
+      for (const duplicate of duplicates) {
+        // Keep the first payment (lowest ID) and delete the rest
+        const deleteResult = this.db.prepare(`
+          DELETE FROM payments 
+          WHERE stripe_payment_intent_id = ? AND id != ?
+        `).run(duplicate.stripe_payment_intent_id, duplicate.keep_id);
+
+        totalDeleted += deleteResult.changes;
+        console.log(`🗑️ Deleted ${deleteResult.changes} duplicate payments for intent: ${duplicate.stripe_payment_intent_id}`);
+      }
+
+      console.log(`✅ Cleanup completed. Deleted ${totalDeleted} duplicate payment records.`);
+      return { duplicates: duplicates.length, deleted: totalDeleted };
+    } catch (error) {
+      console.error('❌ Error cleaning up duplicate payments:', error);
+      throw error;
+    }
+  }
+
+  // VM Setup Management Methods
+  async createVMSetup(userId, planType, vmCount, vmIds) {
+    try {
+      const setupData = {
+        createdAt: new Date().toISOString(),
+        vmIds: vmIds,
+        planType: planType
+      };
+
+      const result = this.statements.insertVMSetup.run(
+        userId,
+        planType,
+        vmCount,
+        JSON.stringify(vmIds),
+        'pending',
+        JSON.stringify(setupData)
+      );
+
+      return result.lastInsertRowid;
+    } catch (error) {
+      console.error('Error creating VM setup:', error);
+      throw error;
+    }
+  }
+
+  async updateVMSetupStatus(userId, status, setupData = {}) {
+    try {
+      const currentSetup = this.statements.getActiveVMSetup.get(userId);
+      if (!currentSetup) {
+        throw new Error('No active VM setup found for user');
+      }
+
+      const existingData = currentSetup.setup_data ? JSON.parse(currentSetup.setup_data) : {};
+      const updatedData = {
+        ...existingData,
+        ...setupData,
+        lastUpdated: new Date().toISOString()
+      };
+
+      const result = this.statements.updateVMSetupStatus.run(
+        status,
+        JSON.stringify(updatedData),
+        userId
+      );
+
+      return result.changes > 0;
+    } catch (error) {
+      console.error('Error updating VM setup status:', error);
+      throw error;
+    }
+  }
+
+  async updateVMSetupFile(userId, filePath, setupData = {}) {
+    try {
+      const currentSetup = this.statements.getActiveVMSetup.get(userId);
+      if (!currentSetup) {
+        throw new Error('No active VM setup found for user');
+      }
+
+      const existingData = currentSetup.setup_data ? JSON.parse(currentSetup.setup_data) : {};
+      const updatedData = {
+        ...existingData,
+        ...setupData,
+        fileUploaded: true,
+        fileUploadedAt: new Date().toISOString(),
+        lastUpdated: new Date().toISOString()
+      };
+
+      const result = this.statements.updateVMSetupFile.run(
+        filePath,
+        'file_uploaded',
+        JSON.stringify(updatedData),
+        userId
+      );
+
+      return result.changes > 0;
+    } catch (error) {
+      console.error('Error updating VM setup file:', error);
+      throw error;
+    }
+  }
+
+  async completeVMSetup(userId, setupData = {}) {
+    try {
+      const currentSetup = this.statements.getActiveVMSetup.get(userId);
+      if (!currentSetup) {
+        throw new Error('No active VM setup found for user');
+      }
+
+      const existingData = currentSetup.setup_data ? JSON.parse(currentSetup.setup_data) : {};
+      const completedData = {
+        ...existingData,
+        ...setupData,
+        completed: true,
+        completedAt: new Date().toISOString(),
+        lastUpdated: new Date().toISOString()
+      };
+
+      const result = this.statements.completeVMSetup.run(
+        JSON.stringify(completedData),
+        userId
+      );
+
+      return result.changes > 0;
+    } catch (error) {
+      console.error('Error completing VM setup:', error);
+      throw error;
+    }
+  }
+
+  async getVMSetupByUser(userId) {
+    try {
+      const setup = this.statements.getVMSetupByUser.get(userId);
+      if (!setup) return null;
+
+      // Parse JSON fields
+      return {
+        ...setup,
+        vm_ids: setup.vm_ids ? JSON.parse(setup.vm_ids) : [],
+        setup_data: setup.setup_data ? JSON.parse(setup.setup_data) : {}
+      };
+    } catch (error) {
+      console.error('Error getting VM setup:', error);
+      throw error;
+    }
+  }
+
+  async getActiveVMSetup(userId) {
+    try {
+      const setup = this.statements.getActiveVMSetup.get(userId);
+      if (!setup) return null;
+
+      // Parse JSON fields
+      return {
+        ...setup,
+        vm_ids: setup.vm_ids ? JSON.parse(setup.vm_ids) : [],
+        setup_data: setup.setup_data ? JSON.parse(setup.setup_data) : {}
+      };
+    } catch (error) {
+      console.error('Error getting active VM setup:', error);
+      throw error;
+    }
   }
 }
 

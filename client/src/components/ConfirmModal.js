@@ -37,11 +37,11 @@ const ConfirmModal = ({
       default: // warning
         return {
           icon: AlertTriangle,
-          iconColor: 'text-yellow-600 dark:text-yellow-400',
-          iconBg: 'bg-yellow-100 dark:bg-yellow-900',
-          confirmBtn: 'bg-yellow-600 dark:bg-yellow-500 hover:bg-yellow-700 dark:hover:bg-yellow-600 text-white',
-          headerBg: 'bg-gradient-to-r from-yellow-50 to-orange-50 dark:from-yellow-900 dark:to-orange-900',
-          borderColor: 'border-yellow-200 dark:border-yellow-600'
+          iconColor: 'text-orange-600 dark:text-orange-400',
+          iconBg: 'bg-orange-100/50 dark:bg-orange-950/30',
+          confirmBtn: 'bg-orange-600 dark:bg-orange-500 hover:bg-orange-700 dark:hover:bg-orange-600 text-white',
+          headerBg: 'bg-gradient-to-r from-orange-50/50 to-red-50/50 dark:from-orange-950/20 dark:to-red-950/20',
+          borderColor: 'border-orange-200 dark:border-orange-700'
         };
     }
   };
@@ -51,6 +51,8 @@ const ConfirmModal = ({
 
   // Check if this is a subscription-related confirmation
   const isSubscriptionModal = title.toLowerCase().includes('subscription') || title.toLowerCase().includes('grant');
+  // Only show free grant message for actual grant operations, not cancellations
+  const showFreeGrant = isSubscriptionModal && (title.toLowerCase().includes('grant') || title.toLowerCase().includes('assign'));
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -63,9 +65,6 @@ const ConfirmModal = ({
             </div>
             <div className="flex-1">
               <h3 className="text-lg font-bold text-gray-900 dark:text-white transition-colors duration-200">{title}</h3>
-              {isSubscriptionModal && (
-                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1 transition-colors duration-200">Administrative Action Required</p>
-              )}
             </div>
             <button
               onClick={onClose}
@@ -79,7 +78,7 @@ const ConfirmModal = ({
         {/* Content */}
         <div className="p-6">
           <div className="mb-6">
-            {isSubscriptionModal ? (
+            {showFreeGrant ? (
               <div className="space-y-4">
                 <p className="text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-line transition-colors duration-200">{message}</p>
                 <div className="bg-green-50 dark:bg-green-900 border border-green-200 dark:border-green-700 rounded-lg p-4 transition-colors duration-200">
@@ -111,7 +110,7 @@ const ConfirmModal = ({
               }}
               className={`px-6 py-2.5 rounded-lg transition-all duration-200 font-medium flex items-center ${typeStyles.confirmBtn}`}
             >
-              {isSubscriptionModal && <Gift className="h-4 w-4 mr-2" />}
+              {showFreeGrant && <Gift className="h-4 w-4 mr-2" />}
               {confirmText}
             </button>
           </div>

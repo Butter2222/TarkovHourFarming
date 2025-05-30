@@ -163,6 +163,9 @@ const Analytics = () => {
               <p className="text-2xl font-bold text-gray-900 dark:text-white transition-colors duration-200">
                 {analytics.userGrowth?.reduce((sum, day) => sum + day.new_users, 0) || 0}
               </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 transition-colors duration-200">
+                {analytics.userGrowth?.length > 0 ? `Active on ${analytics.userGrowth.length} days` : 'No activity'}
+              </p>
             </div>
           </div>
         </div>
@@ -189,7 +192,11 @@ const Analytics = () => {
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600 dark:text-gray-400 transition-colors duration-200">Recent Activity</p>
               <p className="text-2xl font-bold text-gray-900 dark:text-white transition-colors duration-200">
-                {analytics.recentActivity?.reduce((sum, activity) => sum + activity.count, 0) || 0}
+                {analytics.recentActivity?.filter(activity => 
+                  !activity.action.includes('server_overview') && 
+                  !activity.action.includes('server-overview') &&
+                  activity.action !== 'access_server_overview'
+                ).reduce((sum, activity) => sum + activity.count, 0) || 0}
               </p>
             </div>
           </div>
@@ -363,7 +370,14 @@ const Analytics = () => {
             Recent System Activity (7 days)
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {analytics.recentActivity.map((activity, index) => (
+            {analytics.recentActivity
+              .filter(activity => 
+                !activity.action.includes('server_overview') && 
+                !activity.action.includes('server-overview') &&
+                activity.action !== 'access_server_overview' &&
+                activity.action !== 'view_server_overview'
+              )
+              .map((activity, index) => (
               <div key={index} className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
                 <h4 className="font-medium text-gray-900 dark:text-white transition-colors duration-200 capitalize">
                   {activity.action.replace(/_/g, ' ')}
@@ -403,11 +417,12 @@ const Analytics = () => {
         ) : auditLogs && auditLogs.length > 0 ? (
           <>
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
+              <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-600 transition-colors duration-200">
                 <thead className="bg-gray-50 dark:bg-gray-700 transition-colors duration-200">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider transition-colors duration-200">Time</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider transition-colors duration-200">User</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider transition-colors duration-200">Timestamp</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider transition-colors duration-200">Target User</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider transition-colors duration-200">Performed By</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider transition-colors duration-200">Action</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider transition-colors duration-200">Resource</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider transition-colors duration-200">IP Address</th>
@@ -420,7 +435,24 @@ const Analytics = () => {
                         {formatDate(log.created_at)}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white transition-colors duration-200">
-                        {log.username || 'System'}
+                        {log.target_username ? (
+                          <div>
+                            <div className="font-medium">{log.target_username}</div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400 font-mono">ID: {log.target_user_uuid || log.user_id}</div>
+                          </div>
+                        ) : (
+                          <span className="text-gray-500 dark:text-gray-400">System/Deleted</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white transition-colors duration-200">
+                        {log.performed_by_username ? (
+                          <div>
+                            <div className="font-medium">{log.performed_by_username}</div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400 font-mono">ID: {log.performed_by_uuid || log.performed_by_user_id}</div>
+                          </div>
+                        ) : (
+                          <span className="text-gray-500 dark:text-gray-400">System</span>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white transition-colors duration-200">
                         <span className="capitalize">{log.action.replace(/_/g, ' ')}</span>

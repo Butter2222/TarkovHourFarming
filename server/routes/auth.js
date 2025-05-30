@@ -55,7 +55,7 @@ router.post('/login', async (req, res) => {
     });
 
     // Log successful login
-    db.logAction(user.id, 'login_success', 'user', username, null, clientIP);
+    db.logAction(user.id, 'login_success', 'user', username, null, clientIP, user.id);
 
     // Return user data (without password) and token
     const { password: _, ...userWithoutPassword } = user;
@@ -100,7 +100,7 @@ router.post('/register', async (req, res) => {
       role: newUser.role, 
       vmIds: newUser.vmIds,
       selectedPlan: finalSubscriptionPlan
-    }, clientIP);
+    }, clientIP, newUser.id);
 
     // Return user data (without password)
     const { password: _, ...userWithoutPassword } = newUser;
@@ -149,11 +149,20 @@ router.get('/validate', authenticateToken, async (req, res) => {
 });
 
 // Logout endpoint
-router.post('/logout', authenticateToken, (req, res) => {
+router.post('/logout', authenticateToken, async (req, res) => {
   const clientIP = req.ip || req.connection.remoteAddress;
   
-  // Log logout
-  db.logAction(req.user.id, 'logout', 'user', req.user.username, null, clientIP);
+  // Check if user still exists before logging (they might have just deleted their account)
+  try {
+    const user = await db.findUserByIdForAuth(req.user.id);
+    if (user) {
+      // Only log if user still exists
+      db.logAction(req.user.id, 'logout', 'user', req.user.username, null, clientIP, req.user.id);
+    }
+  } catch (error) {
+    // Silently handle error - user might have been deleted
+    console.log('User not found for logout logging (likely deleted account):', req.user.id);
+  }
   
   res.json({ message: 'Logout successful' });
 });

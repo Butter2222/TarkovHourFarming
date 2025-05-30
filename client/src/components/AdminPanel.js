@@ -21,7 +21,8 @@ import {
   Eye,
   EyeOff,
   CreditCard,
-  Crown
+  Crown,
+  UserPlus
 } from 'lucide-react';
 import Toast from './Toast';
 import ConfirmModal from './ConfirmModal';
@@ -51,7 +52,8 @@ const AdminPanel = () => {
     role: 'customer',
     vmIds: '',
     subscriptionPlan: 'none',
-    subscriptionExpiresAt: ''
+    subscriptionDuration: '',
+    subscriptionDurationType: 'months'
   });
   const [showPassword, setShowPassword] = useState(false);
   const [addUserError, setAddUserError] = useState('');
@@ -235,7 +237,8 @@ const AdminPanel = () => {
       const userData = {
         ...addUserForm,
         vmIds,
-        subscriptionExpiresAt: addUserForm.subscriptionExpiresAt || null
+        subscriptionDuration: addUserForm.subscriptionDuration || null,
+        subscriptionDurationType: addUserForm.subscriptionDurationType || null
       };
 
       const response = await fetch('/api/admin/users/create', {
@@ -249,7 +252,15 @@ const AdminPanel = () => {
 
       if (response.ok) {
         const result = await response.json();
-        showToast(`User created successfully!\n\nAccount ID: ${result.user.uuid}\nUsername: ${result.user.username}\nTemporary Password: ${addUserForm.password}\n\nPlease provide these credentials to the user securely.`, 'success');
+        
+        let successMessage = `User created successfully!\n\nAccount ID: ${result.user.uuid}\nUsername: ${result.user.username}\nTemporary Password: ${addUserForm.password}\n\nPlease provide these credentials to the user securely.`;
+        
+        // Add subscription info if applicable
+        if (addUserForm.subscriptionPlan !== 'none' && addUserForm.subscriptionDuration) {
+          successMessage += `\n\nSubscription: ${addUserForm.subscriptionPlan} plan for ${addUserForm.subscriptionDuration} ${addUserForm.subscriptionDurationType} (Free admin grant)`;
+        }
+        
+        showToast(successMessage, 'success');
         
         // Reset form
         setAddUserForm({
@@ -259,7 +270,8 @@ const AdminPanel = () => {
           role: 'customer',
           vmIds: '',
           subscriptionPlan: 'none',
-          subscriptionExpiresAt: ''
+          subscriptionDuration: '',
+          subscriptionDurationType: 'months'
         });
         
         setShowAddUserModal(false);
@@ -402,13 +414,15 @@ const AdminPanel = () => {
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white transition-colors duration-200">User Management</h1>
           <p className="text-gray-600 dark:text-gray-400 transition-colors duration-200">Manage user accounts, permissions, and subscriptions</p>
         </div>
-        <button 
-          onClick={() => setShowAddUserModal(true)}
-          className="bg-blue-600 dark:bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-700 dark:hover:bg-blue-600 flex items-center transition-colors duration-200"
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Add User
-        </button>
+        <div className="flex space-x-3">
+          <button 
+            onClick={() => setShowAddUserModal(true)}
+            className="bg-blue-600 dark:bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-700 dark:hover:bg-blue-600 flex items-center transition-colors duration-200"
+          >
+            <UserPlus className="h-4 w-4 mr-2" />
+            Add User
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -656,8 +670,9 @@ const AdminPanel = () => {
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors duration-200"
                   >
                     <option value="none">No Plan</option>
-                    <option value="Basic">Basic</option>
-                    <option value="Premium">Premium</option>
+                    <option value="Hour Booster">Hour Booster ($12/month value)</option>
+                    <option value="KD Drop">KD Drop ($16/month value)</option>
+                    <option value="Dual Mode">Dual Mode ($18/month value)</option>
                   </select>
                 </div>
               </div>
@@ -674,15 +689,48 @@ const AdminPanel = () => {
               </div>
               
               {addUserForm.subscriptionPlan !== 'none' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 transition-colors duration-200">Subscription Expires</label>
-                  <input
-                    type="datetime-local"
-                    value={addUserForm.subscriptionExpiresAt}
-                    onChange={(e) => setAddUserForm(prev => ({ ...prev, subscriptionExpiresAt: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors duration-200"
-                  />
-                </div>
+                <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 transition-colors duration-200">Subscription Duration *</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="999"
+                        required
+                        value={addUserForm.subscriptionDuration}
+                        onChange={(e) => setAddUserForm(prev => ({ ...prev, subscriptionDuration: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors duration-200"
+                        placeholder="1"
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 transition-colors duration-200">Time Period *</label>
+                      <select
+                        required
+                        value={addUserForm.subscriptionDurationType}
+                        onChange={(e) => setAddUserForm(prev => ({ ...prev, subscriptionDurationType: e.target.value }))}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors duration-200"
+                      >
+                        <option value="days">Days</option>
+                        <option value="weeks">Weeks</option>
+                        <option value="months">Months</option>
+                        <option value="years">Years</option>
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-green-50 dark:bg-green-900 border border-green-200 dark:border-green-600 rounded-md p-3 transition-colors duration-200">
+                    <div className="flex items-center">
+                      <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400 mr-2" />
+                      <span className="text-sm font-medium text-green-900 dark:text-white transition-colors duration-200">Free Administrative Grant</span>
+                    </div>
+                    <p className="text-sm text-green-700 dark:text-green-300 mt-1 transition-colors duration-200">
+                      This user will receive a {addUserForm.subscriptionPlan} subscription at no cost for the specified duration.
+                    </p>
+                  </div>
+                </>
               )}
               
               <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200 dark:border-gray-600 transition-colors duration-200">
@@ -772,6 +820,12 @@ const UserDetailsModal = ({ user, onClose, onAction, actionLoading, onRefresh, o
   });
   const [saving, setSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
+  
+  // Payment history state
+  const [paymentHistory, setPaymentHistory] = useState({ payments: [], refunds: [], loading: true });
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [selectedPayment, setSelectedPayment] = useState(null);
+  const [refundData, setRefundData] = useState({ amount: '', reason: 'requested_by_customer', adminReason: '' });
 
   const validateField = (name, value) => {
     const errors = { ...fieldErrors };
@@ -895,9 +949,116 @@ const UserDetailsModal = ({ user, onClose, onAction, actionLoading, onRefresh, o
   const tabs = [
     { id: 'details', label: 'Profile Details', icon: <Edit3 className="h-4 w-4" /> },
     { id: 'subscription', label: 'Subscription', icon: <CreditCard className="h-4 w-4" /> },
+    { id: 'payments', label: 'Payment History', icon: <CreditCard className="h-4 w-4" /> },
     { id: 'vms', label: 'Virtual Machines', icon: <Shield className="h-4 w-4" /> },
     { id: 'actions', label: 'Account Actions', icon: <AlertTriangle className="h-4 w-4" /> }
   ];
+
+  // Fetch payment history
+  const fetchPaymentHistory = async () => {
+    try {
+      setPaymentHistory(prev => ({ ...prev, loading: true }));
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/admin/users/${user.id}/payment-history`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setPaymentHistory({
+          payments: data.payments || [],
+          refunds: data.refunds || [],
+          loading: false
+        });
+      } else {
+        console.error('Failed to fetch payment history');
+        setPaymentHistory(prev => ({ ...prev, loading: false }));
+        showToast('Failed to fetch payment history', 'error');
+      }
+    } catch (error) {
+      console.error('Error fetching payment history:', error);
+      setPaymentHistory(prev => ({ ...prev, loading: false }));
+      showToast('Error fetching payment history', 'error');
+    }
+  };
+
+  // Handle refund processing
+  const handleProcessRefund = async (e) => {
+    e.preventDefault();
+    
+    try {
+      console.log('🔄 Processing refund on frontend:', {
+        selectedPayment,
+        refundData,
+        userId: user.id
+      });
+
+      const token = localStorage.getItem('token');
+      
+      // Calculate refund amount properly
+      const refundAmount = refundData.amount ? parseFloat(refundData.amount) : (selectedPayment.amount / 100);
+      
+      console.log('💰 Refund amount calculation:', {
+        inputAmount: refundData.amount,
+        calculatedAmount: refundAmount,
+        originalAmount: selectedPayment.amount,
+        originalAmountDollars: selectedPayment.amount / 100
+      });
+
+      const requestBody = {
+        paymentId: selectedPayment.id,
+        amount: refundAmount, // Send as dollars, backend will convert to cents
+        reason: refundData.reason,
+        adminReason: refundData.adminReason
+      };
+
+      console.log('📤 Sending refund request:', requestBody);
+
+      const response = await fetch(`/api/admin/users/${user.id}/process-refund`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      console.log('📥 Refund response status:', response.status);
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log('✅ Refund response data:', data);
+        showToast(data.message || 'Refund processed successfully', 'success');
+        setShowRefundModal(false);
+        setSelectedPayment(null);
+        setRefundData({ amount: '', reason: 'requested_by_customer', adminReason: '' });
+        await fetchPaymentHistory(); // Refresh payment history
+      } else {
+        const errorText = await response.text();
+        console.error('❌ Refund error response:', errorText);
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch (e) {
+          errorData = { error: errorText };
+        }
+        showToast(errorData.error || 'Failed to process refund', 'error');
+      }
+    } catch (error) {
+      console.error('❌ Error processing refund:', error);
+      showToast('Network error while processing refund: ' + error.message, 'error');
+    }
+  };
+
+  // Load payment history when tab is selected
+  const handleTabChange = (tabId) => {
+    setActiveTab(tabId);
+    if (tabId === 'payments' && paymentHistory.loading) {
+      fetchPaymentHistory();
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -947,7 +1108,7 @@ const UserDetailsModal = ({ user, onClose, onAction, actionLoading, onRefresh, o
             {tabs.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => handleTabChange(tab.id)}
                 className={`py-3 px-4 border-b-2 font-medium text-sm flex items-center space-x-2 transition-colors ${
                   activeTab === tab.id
                     ? 'border-blue-500 text-blue-600 dark:border-blue-400 dark:text-blue-400'
@@ -1260,44 +1421,6 @@ const UserDetailsModal = ({ user, onClose, onAction, actionLoading, onRefresh, o
                 </div>
               </div>
 
-              {/* Quick Free Subscription Presets */}
-              <div className="bg-green-50 dark:bg-green-900 border border-green-200 dark:border-green-700 rounded-lg p-4 transition-colors duration-200">
-                <h4 className="font-medium text-gray-900 dark:text-white mb-3 flex items-center transition-colors duration-200">
-                  <Calendar className="h-5 w-5 text-green-600 dark:text-green-400 mr-2" />
-                  Quick Free Subscription
-                </h4>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 transition-colors duration-200">Grant instant free access with these common durations:</p>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {[
-                    { label: '1 Week Trial', plan: 'Basic', duration: 1, type: 'weeks' },
-                    { label: '1 Month Free', plan: 'Basic', duration: 1, type: 'months' },
-                    { label: '3 Months Free', plan: 'Premium', duration: 3, type: 'months' },
-                    { label: '1 Year Free', plan: 'Premium', duration: 1, type: 'years' }
-                  ].map((preset) => (
-                    <button
-                      key={preset.label}
-                      onClick={() => {
-                        showConfirm({
-                          title: 'Grant Free Subscription',
-                          message: `Grant ${preset.label} (${preset.plan}) to ${user.username}?\n\nThis will give them free access for ${preset.duration} ${preset.type}.`,
-                          type: 'subscription',
-                          confirmText: 'Grant Access',
-                          onConfirm: () => onAction(user.id, 'assign-subscription', { 
-                            plan: preset.plan, 
-                            duration: preset.duration, 
-                            durationType: preset.type 
-                          })
-                        });
-                      }}
-                      disabled={actionLoading[`${user.id}-assign-subscription`]}
-                      className="bg-white dark:bg-gray-700 border-2 border-green-300 dark:border-green-600 text-green-700 dark:text-green-300 px-3 py-2 rounded-md hover:bg-green-100 dark:hover:bg-green-800 transition-colors duration-200 text-sm font-medium disabled:opacity-50"
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               {/* Custom Subscription Assignment */}
               <div className="bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg transition-colors duration-200">
                 <div className="border-b border-gray-200 dark:border-gray-600 px-4 py-3 transition-colors duration-200">
@@ -1346,9 +1469,10 @@ const UserDetailsModal = ({ user, onClose, onAction, actionLoading, onRefresh, o
                         required
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-600 text-gray-900 dark:text-white transition-colors duration-200"
                       >
-                        <option value="">Choose a plan...</option>
-                        <option value="Basic">Basic Plan ($12/month value)</option>
-                        <option value="Premium">Premium Plan ($20/month value)</option>
+                        <option value="">No Subscription</option>
+                        <option value="Hour Booster">Hour Booster ($12/month value)</option>
+                        <option value="KD Drop">KD Drop ($16/month value)</option>
+                        <option value="Dual Mode">Dual Mode ($18/month value)</option>
                       </select>
                     </div>
                     <div>
@@ -1412,6 +1536,155 @@ const UserDetailsModal = ({ user, onClose, onAction, actionLoading, onRefresh, o
                   </button>
                 </form>
               </div>
+            </div>
+          )}
+
+          {activeTab === 'payments' && (
+            <div className="space-y-6">
+              {/* Payment History Header */}
+              <div className="bg-blue-50 dark:bg-blue-900 border border-blue-200 dark:border-blue-600 rounded-lg p-4 transition-colors duration-200">
+                <h4 className="font-medium text-blue-900 dark:text-white mb-2 flex items-center transition-colors duration-200">
+                  <CreditCard className="h-5 w-5 mr-2 text-blue-600 dark:text-blue-400" />
+                  Payment History & Billing
+                </h4>
+                <p className="text-sm text-blue-700 dark:text-blue-300 transition-colors duration-200">
+                  View payment transactions, subscription history, and process refunds for this customer.
+                </p>
+              </div>
+
+              {paymentHistory.loading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-600 dark:text-blue-400" />
+                </div>
+              ) : (
+                <>
+                  {/* Payments Table */}
+                  <div className="bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden transition-colors duration-200">
+                    <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-600">
+                      <h5 className="font-medium text-gray-900 dark:text-white transition-colors duration-200">Payment Transactions</h5>
+                    </div>
+                    
+                    {paymentHistory.payments.length === 0 ? (
+                      <div className="p-8 text-center text-gray-500 dark:text-gray-400">
+                        <CreditCard className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                        <p>No payment history found</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
+                          <thead className="bg-gray-50 dark:bg-gray-600">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Date</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Plan</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Amount</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Status</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Method</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white dark:bg-gray-700 divide-y divide-gray-200 dark:divide-gray-600">
+                            {paymentHistory.payments.map((payment) => (
+                              <tr key={payment.id} className="hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors duration-200">
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                                  {new Date(payment.created_at).toLocaleDateString()}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                                  {payment.plan_name || 'Unknown'}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
+                                  {payment.amountFormatted}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  <span className={`px-2 py-1 text-xs rounded-full ${
+                                    payment.status === 'succeeded' 
+                                      ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300' 
+                                      : payment.status === 'failed'
+                                      ? 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-300'
+                                      : 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-300'
+                                  }`}>
+                                    {payment.status}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                                  {payment.payment_method || 'Card'}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm">
+                                  {payment.status === 'succeeded' && (
+                                    <button
+                                      onClick={() => {
+                                        setSelectedPayment(payment);
+                                        setRefundData({ 
+                                          amount: (payment.amount / 100).toFixed(2), 
+                                          reason: 'requested_by_customer', 
+                                          adminReason: '' 
+                                        });
+                                        setShowRefundModal(true);
+                                      }}
+                                      className="text-red-600 dark:text-red-400 hover:text-red-900 dark:hover:text-red-300 font-medium transition-colors duration-200"
+                                    >
+                                      Refund
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Refunds Table */}
+                  {paymentHistory.refunds.length > 0 && (
+                    <div className="bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg overflow-hidden transition-colors duration-200">
+                      <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-600">
+                        <h5 className="font-medium text-gray-900 dark:text-white transition-colors duration-200">Refund History</h5>
+                      </div>
+                      
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-600">
+                          <thead className="bg-gray-50 dark:bg-gray-600">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Date</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Amount</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Reason</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Status</th>
+                              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Admin Reason</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white dark:bg-gray-700 divide-y divide-gray-200 dark:divide-gray-600">
+                            {paymentHistory.refunds.map((refund) => (
+                              <tr key={refund.id} className="hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors duration-200">
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                                  {new Date(refund.created_at).toLocaleDateString()}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-red-600 dark:text-red-400">
+                                  -{refund.amountFormatted}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                                  {refund.reason}
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  <span className={`px-2 py-1 text-xs rounded-full ${
+                                    refund.status === 'succeeded' 
+                                      ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300' 
+                                      : 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-300'
+                                  }`}>
+                                    {refund.status}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                                  {refund.admin_reason || 'N/A'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
 
@@ -1506,6 +1779,97 @@ const UserDetailsModal = ({ user, onClose, onAction, actionLoading, onRefresh, o
           )}
         </div>
       </div>
+
+      {/* Refund Modal */}
+      {showRefundModal && selectedPayment && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full mx-4 shadow-xl">
+            <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-600">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Process Refund</h3>
+            </div>
+            
+            <form onSubmit={handleProcessRefund} className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Payment Details
+                </label>
+                <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded border text-sm">
+                  <p><strong>Date:</strong> {new Date(selectedPayment.created_at).toLocaleDateString()}</p>
+                  <p><strong>Amount:</strong> ${(selectedPayment.amount / 100).toFixed(2)}</p>
+                  <p><strong>Plan:</strong> {selectedPayment.plan_name}</p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Refund Amount ($)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  max={(selectedPayment.amount / 100).toFixed(2)}
+                  value={refundData.amount}
+                  onChange={(e) => setRefundData(prev => ({ ...prev, amount: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  placeholder="Enter refund amount"
+                  required
+                />
+                <p className="text-xs text-gray-500 mt-1">Maximum: ${(selectedPayment.amount / 100).toFixed(2)}</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Refund Reason
+                </label>
+                <select
+                  value={refundData.reason}
+                  onChange={(e) => setRefundData(prev => ({ ...prev, reason: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                >
+                  <option value="requested_by_customer">Requested by Customer</option>
+                  <option value="duplicate">Duplicate Payment</option>
+                  <option value="fraudulent">Fraudulent Transaction</option>
+                  <option value="subscription_canceled">Subscription Canceled</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Admin Notes
+                </label>
+                <textarea
+                  value={refundData.adminReason}
+                  onChange={(e) => setRefundData(prev => ({ ...prev, adminReason: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  rows="3"
+                  placeholder="Internal reason for refund (optional)"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowRefundModal(false);
+                    setSelectedPayment(null);
+                    setRefundData({ amount: '', reason: 'requested_by_customer', adminReason: '' });
+                  }}
+                  className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-600 rounded hover:bg-gray-200 dark:hover:bg-gray-500 transition-colors duration-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors duration-200 flex items-center"
+                >
+                  <CreditCard className="h-4 w-4 mr-2" />
+                  Process Refund
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

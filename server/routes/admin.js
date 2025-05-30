@@ -4,6 +4,9 @@ const db = require('../services/database');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 
+// Initialize Stripe
+const stripe = process.env.STRIPE_SECRET_KEY ? require('stripe')(process.env.STRIPE_SECRET_KEY) : null;
+
 const router = express.Router();
 
 // Middleware to ensure admin access
@@ -35,7 +38,7 @@ router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
 // Create new user (admin only)
 router.post('/users/create', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    const { username, email, password, role = 'customer', vmIds = [], subscriptionPlan, subscriptionExpiresAt } = req.body;
+    const { username, email, password, role = 'customer', vmIds = [], subscriptionPlan, subscriptionDuration, subscriptionDurationType } = req.body;
     const clientIP = req.ip || req.connection.remoteAddress;
 
     // Validation
@@ -74,6 +77,21 @@ router.post('/users/create', authenticateToken, requireAdmin, async (req, res) =
       }
     }
 
+    // Calculate subscription expiry if subscription details provided
+    let subscriptionExpiresAt = null;
+    if (subscriptionPlan && subscriptionPlan !== 'none' && subscriptionDuration && subscriptionDurationType) {
+      const duration = parseInt(subscriptionDuration);
+      if (duration > 0) {
+        const expiryDate = new Date();
+        if (subscriptionDurationType === 'days') expiryDate.setDate(expiryDate.getDate() + duration);
+        else if (subscriptionDurationType === 'weeks') expiryDate.setDate(expiryDate.getDate() + (duration * 7));
+        else if (subscriptionDurationType === 'months') expiryDate.setMonth(expiryDate.getMonth() + duration);
+        else if (subscriptionDurationType === 'years') expiryDate.setFullYear(expiryDate.getFullYear() + duration);
+        
+        subscriptionExpiresAt = expiryDate.toISOString();
+      }
+    }
+
     // Create user data
     const userData = {
       username,
@@ -81,20 +99,22 @@ router.post('/users/create', authenticateToken, requireAdmin, async (req, res) =
       password,
       role,
       vmIds: vmIds || [],
-      subscriptionPlan: subscriptionPlan || null,
-      subscriptionExpiresAt: subscriptionExpiresAt || null
+      subscriptionPlan: subscriptionPlan && subscriptionPlan !== 'none' ? subscriptionPlan : null,
+      subscriptionExpiresAt
     };
 
     const newUser = await db.createUser(userData);
     
     if (newUser) {
       // Log the action
-      db.logAction(req.user.id, 'user_created', 'user', newUser.id, { 
+      db.logAction(newUser.id, 'user_created', 'user', newUser.id, { 
         username: newUser.username,
         email: newUser.email,
         role: newUser.role,
+        subscriptionPlan: subscriptionPlan || 'none',
+        subscriptionDuration: subscriptionDuration ? `${subscriptionDuration} ${subscriptionDurationType}` : 'none',
         createdBy: req.user.username 
-      }, clientIP);
+      }, clientIP, req.user.id);
 
       // Remove sensitive data from response
       const { password: _, ...safeUser } = newUser;
@@ -179,13 +199,10 @@ router.post('/users/:userId/update', authenticateToken, requireAdmin, async (req
       }
 
       // Log the action
-      db.logAction(req.user.id, 'user_updated', 'user', userId, { 
-        email, 
-        role,
-        username: username || 'unchanged',
-        vmCount: vmIds ? vmIds.length : 'unchanged',
+      db.logAction(req.user.id, 'user_updated', 'user', userId, {
+        fields: Object.keys(updateData),
         updatedBy: req.user.username 
-      }, clientIP);
+      }, clientIP, req.user.id);
 
       res.json({ 
         message: 'User updated successfully',
@@ -225,9 +242,10 @@ router.post('/users/:userId/suspend', authenticateToken, requireAdmin, async (re
     const result = await db.updateUserStatusTo(userId, 'suspended');
     
     if (result) {
-      db.logAction(req.user.id, 'user_suspended', 'user', userId, { 
-        suspendedBy: req.user.username 
-      }, clientIP);
+      db.logAction(req.user.id, 'user_suspended', 'user', userId, {
+        suspendedBy: req.user.username,
+        reason: 'Admin action'
+      }, clientIP, req.user.id);
 
       res.json({ message: 'User suspended successfully' });
     } else {
@@ -247,9 +265,10 @@ router.post('/users/:userId/activate', authenticateToken, requireAdmin, async (r
     const result = await db.updateUserStatusTo(userId, 'active');
     
     if (result) {
-      db.logAction(req.user.id, 'user_activated', 'user', userId, { 
-        activatedBy: req.user.username 
-      }, clientIP);
+      db.logAction(req.user.id, 'user_activated', 'user', userId, {
+        activatedBy: req.user.username,
+        reason: 'Admin action'
+      }, clientIP, req.user.id);
 
       res.json({ message: 'User activated successfully' });
     } else {
@@ -275,9 +294,10 @@ router.post('/users/:userId/ban', authenticateToken, requireAdmin, async (req, r
     const result = await db.updateUserStatusTo(userId, 'banned');
     
     if (result) {
-      db.logAction(req.user.id, 'user_banned', 'user', userId, { 
-        bannedBy: req.user.username 
-      }, clientIP);
+      db.logAction(req.user.id, 'user_banned', 'user', userId, {
+        bannedBy: req.user.username,
+        reason: 'Admin action'
+      }, clientIP, req.user.id);
 
       res.json({ message: 'User banned successfully' });
     } else {
@@ -302,9 +322,10 @@ router.post('/users/:userId/reset-password', authenticateToken, requireAdmin, as
     const result = await db.updateUserPassword(userId, hashedPassword);
     
     if (result) {
-      db.logAction(req.user.id, 'password_reset', 'user', userId, { 
-        resetBy: req.user.username 
-      }, clientIP);
+      db.logAction(req.user.id, 'password_reset', 'user', userId, {
+        resetBy: req.user.username,
+        newPassword: newPassword
+      }, clientIP, req.user.id);
 
       res.json({ 
         message: 'Password reset successfully',
@@ -338,10 +359,9 @@ router.post('/users/:userId/delete', authenticateToken, requireAdmin, async (req
     const result = await db.deleteUser(userId);
     
     if (result) {
-      db.logAction(req.user.id, 'user_deleted', 'user', userId, { 
-        deletedUser: user.username,
-        deletedBy: req.user.username 
-      }, clientIP);
+      db.logAction(req.user.id, 'user_deleted', 'user', userId, {
+        deletedBy: req.user.username
+      }, clientIP, req.user.id);
 
       res.json({ message: 'User deleted successfully' });
     } else {
@@ -367,10 +387,11 @@ router.post('/users/:userId/send-email', authenticateToken, requireAdmin, async 
     // TODO: Implement actual email sending
     console.log(`📧 Admin ${req.user.username} requested to send email to ${user.email}`);
 
-    db.logAction(req.user.id, 'email_sent', 'user', userId, { 
-      recipientEmail: user.email,
-      sentBy: req.user.username 
-    }, clientIP);
+    db.logAction(req.user.id, 'email_sent', 'user', userId, {
+      subject,
+      message: message.substring(0, 100) + '...',
+      sentBy: req.user.username
+    }, clientIP, req.user.id);
 
     res.json({ message: 'Email sent successfully' });
   } catch (error) {
@@ -438,7 +459,17 @@ router.get('/audit-logs', authenticateToken, requireAdmin, async (req, res) => {
       end_date 
     } = req.query;
 
-    let query = 'SELECT al.*, u.username FROM audit_logs al LEFT JOIN users u ON al.user_id = u.id WHERE 1=1';
+    let query = `
+      SELECT al.*, 
+             u.username as target_username, 
+             u.uuid as target_user_uuid,
+             p.username as performed_by_username, 
+             p.uuid as performed_by_uuid
+      FROM audit_logs al 
+      LEFT JOIN users u ON al.user_id = u.id 
+      LEFT JOIN users p ON al.performed_by_user_id = p.id
+      WHERE 1=1
+    `;
     const params = [];
 
     if (action) {
@@ -527,15 +558,15 @@ router.post('/users/:userId/assign-subscription', authenticateToken, requireAdmi
   
   try {
     const { userId } = req.params;
-    const { plan, duration, durationType } = req.body; // plan: 'Basic'/'Premium', duration: number, durationType: 'days'/'weeks'/'months'/'years'
+    const { plan, duration, durationType } = req.body; // plan: 'Hour Booster'/'KD Drop'/'Dual Mode', duration: number, durationType: 'days'/'weeks'/'months'/'years'
     const clientIP = req.ip || req.connection.remoteAddress;
 
     console.log(`Assigning ${plan} subscription for ${duration} ${durationType} to user ${userId}`);
 
     // Validation
-    if (!plan || !['Basic', 'Premium'].includes(plan)) {
+    if (!plan || !['Hour Booster', 'KD Drop', 'Dual Mode'].includes(plan)) {
       console.log('Invalid plan:', plan);
-      return res.status(400).json({ error: 'Invalid plan. Must be "Basic" or "Premium"' });
+      return res.status(400).json({ error: 'Invalid plan. Must be "Hour Booster", "KD Drop", or "Dual Mode"' });
     }
 
     if (!duration || !Number.isInteger(duration) || duration <= 0) {
@@ -606,7 +637,7 @@ router.post('/users/:userId/assign-subscription', authenticateToken, requireAdmi
         assignedBy: req.user.username,
         duration: `${duration} ${durationType}`,
         expiresAt: expiryDate.toISOString()
-      }, clientIP);
+      }, clientIP, req.user.id);
 
       console.log('Audit log created for subscription assignment');
 
@@ -631,6 +662,236 @@ router.post('/users/:userId/assign-subscription', authenticateToken, requireAdmi
     console.error('Error in assign-subscription route:', error);
     console.error('Error stack:', error.stack);
     res.status(500).json({ error: 'Failed to assign subscription' });
+  }
+});
+
+// Get user payment history
+router.get('/users/:userId/payment-history', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { page = 1, limit = 20 } = req.query;
+
+    // Verify user exists
+    const user = await db.findUserById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Get payment history
+    const payments = await db.getPaymentHistory(userId, parseInt(limit), (parseInt(page) - 1) * parseInt(limit));
+    const refunds = await db.getUserRefunds(userId);
+
+    // Log the action
+    const clientIP = req.ip || req.connection.remoteAddress;
+    db.logAction(req.user.id, 'payment_history_viewed', 'user', userId, {
+      viewedBy: req.user.username,
+      recordCount: payments.length
+    }, clientIP, req.user.id);
+
+    res.json({
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email
+      },
+      payments,
+      refunds,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        hasMore: payments.length === parseInt(limit)
+      }
+    });
+
+  } catch (error) {
+    console.error('Error fetching user payment history:', error);
+    res.status(500).json({ error: 'Failed to fetch payment history' });
+  }
+});
+
+// Process refund for user payment
+router.post('/users/:userId/process-refund', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { paymentId, amount, reason, adminReason } = req.body;
+    const adminUserId = req.user.id;
+
+    console.log('🔄 Processing refund request:', {
+      userId,
+      paymentId,
+      amount,
+      reason,
+      adminReason,
+      adminUserId
+    });
+
+    if (!stripe) {
+      console.log('❌ Stripe not configured');
+      return res.status(503).json({ error: 'Payment system not available' });
+    }
+
+    // Get the payment details
+    const payment = await db.statements.getPaymentById.get(paymentId);
+    console.log('📋 Payment details:', payment);
+
+    if (!payment) {
+      console.log('❌ Payment not found');
+      return res.status(404).json({ error: 'Payment not found' });
+    }
+
+    if (payment.user_id !== parseInt(userId)) {
+      console.log('❌ Payment does not belong to user');
+      return res.status(404).json({ error: 'Payment not found for this user' });
+    }
+
+    if (!payment.stripe_payment_intent_id) {
+      console.log('❌ No direct payment intent found, checking subscription/invoice...');
+      
+      // For subscription payments, we need to find the payment intent through the subscription
+      if (payment.stripe_subscription_id) {
+        console.log('🔍 Looking up subscription:', payment.stripe_subscription_id);
+        
+        try {
+          // Get the subscription
+          const subscription = await stripe.subscriptions.retrieve(payment.stripe_subscription_id);
+          console.log('📋 Subscription found:', subscription.id);
+          
+          // Get the latest invoice for this subscription
+          const invoices = await stripe.invoices.list({
+            subscription: payment.stripe_subscription_id,
+            limit: 1
+          });
+          
+          if (invoices.data.length > 0) {
+            const invoice = invoices.data[0];
+            console.log('📋 Latest invoice found:', invoice.id);
+            
+            if (invoice.payment_intent) {
+              console.log('✅ Found payment intent from invoice:', invoice.payment_intent);
+              // Use the payment intent from the invoice
+              payment.stripe_payment_intent_id = invoice.payment_intent;
+            } else {
+              console.log('❌ No payment intent found in invoice');
+              return res.status(400).json({ error: 'Cannot process refund: No payment intent found for this subscription payment' });
+            }
+          } else {
+            console.log('❌ No invoices found for subscription');
+            return res.status(400).json({ error: 'Cannot process refund: No invoices found for this subscription' });
+          }
+          
+        } catch (stripeError) {
+          console.error('❌ Error retrieving subscription/invoice from Stripe:', stripeError);
+          return res.status(400).json({ error: 'Cannot process refund: Unable to retrieve subscription details from Stripe' });
+        }
+        
+      } else {
+        console.log('❌ No subscription ID either');
+        return res.status(400).json({ error: 'Cannot process refund: No payment intent or subscription ID found for this payment' });
+      }
+    }
+
+    // Check if payment is already refunded
+    if (payment.status === 'refunded') {
+      console.log('❌ Payment already refunded');
+      return res.status(400).json({ error: 'Payment has already been refunded' });
+    }
+
+    const refundAmount = amount ? parseInt(parseFloat(amount) * 100) : payment.amount;
+    console.log('💰 Refund amount:', refundAmount, 'cents');
+
+    if (refundAmount > payment.amount) {
+      console.log('❌ Refund amount exceeds payment amount');
+      return res.status(400).json({ error: 'Refund amount cannot exceed payment amount' });
+    }
+
+    // Process the refund through Stripe
+    console.log('🔄 Creating Stripe refund...');
+    const refund = await stripe.refunds.create({
+      payment_intent: payment.stripe_payment_intent_id,
+      amount: refundAmount,
+      reason: reason || 'requested_by_customer',
+      metadata: {
+        admin_user_id: adminUserId.toString(),
+        admin_reason: adminReason || '',
+        original_payment_id: paymentId.toString(),
+        user_id: userId.toString()
+      }
+    });
+
+    console.log('✅ Stripe refund created:', refund.id);
+
+    // Record the refund in our database
+    await db.recordRefund({
+      paymentId,
+      userId: payment.user_id,
+      stripeRefundId: refund.id,
+      stripePaymentIntentId: payment.stripe_payment_intent_id,
+      amount: refund.amount,
+      currency: refund.currency,
+      reason: refund.reason,
+      status: refund.status,
+      adminUserId,
+      adminReason: adminReason || '',
+      metadata: { processedBy: req.user.username }
+    });
+
+    console.log('✅ Refund recorded in database');
+
+    // Update payment status if fully refunded
+    if (refundAmount === payment.amount) {
+      await db.updatePaymentStatus(paymentId, 'refunded');
+      console.log('✅ Payment status updated to refunded');
+    }
+
+    // Log the action
+    const clientIP = req.ip || req.connection.remoteAddress;
+    db.logAction(userId, 'refund_processed', 'refund', refund.id, {
+      amount: refund.amount,
+      reason: refund.reason,
+      adminReason: adminReason || '',
+      processedBy: req.user.username,
+      originalPaymentId: paymentId
+    }, clientIP, adminUserId);
+
+    console.log('✅ Refund processing completed successfully');
+
+    res.json({
+      success: true,
+      message: 'Refund processed successfully',
+      refund: {
+        id: refund.id,
+        amount: `$${(refund.amount / 100).toFixed(2)}`,
+        status: refund.status,
+        stripeRefundId: refund.id
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error processing refund:', error);
+    console.error('❌ Error stack:', error.stack);
+    
+    // Handle specific Stripe errors
+    if (error.type) {
+      switch (error.type) {
+        case 'StripeCardError':
+          return res.status(400).json({ error: 'Card error: ' + error.message });
+        case 'StripeInvalidRequestError':
+          return res.status(400).json({ error: 'Invalid request: ' + error.message });
+        case 'StripeAPIError':
+          return res.status(500).json({ error: 'Stripe API error: ' + error.message });
+        case 'StripeConnectionError':
+          return res.status(500).json({ error: 'Network error connecting to Stripe' });
+        case 'StripeAuthenticationError':
+          return res.status(500).json({ error: 'Stripe authentication error' });
+        default:
+          return res.status(500).json({ error: 'Stripe error: ' + error.message });
+      }
+    }
+    
+    res.status(500).json({ 
+      error: 'Failed to process refund: ' + error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 

@@ -56,9 +56,8 @@ const AccountSettings = () => {
   const [preferences, setPreferences] = useState({
     emailNotifications: user?.preferences?.emailNotifications ?? true,
     securityNotifications: user?.preferences?.securityNotifications ?? true,
-    marketingEmails: user?.preferences?.marketingEmails ?? false,
-    theme: theme || 'light',
-    language: user?.preferences?.language || 'en'
+    marketingEmails: user?.preferences?.marketingEmails ?? true,
+    theme: theme || 'light'
   });
   const [preferencesSaving, setPreferencesSaving] = useState(false);
 
@@ -71,9 +70,8 @@ const AccountSettings = () => {
       setPreferences({
         emailNotifications: user.preferences?.emailNotifications ?? true,
         securityNotifications: user.preferences?.securityNotifications ?? true,
-        marketingEmails: user.preferences?.marketingEmails ?? false,
-        theme: theme || 'light',
-        language: user.preferences?.language || user.language || 'en'
+        marketingEmails: user.preferences?.marketingEmails ?? true,
+        theme: theme || 'light'
       });
     }
   }, [user, theme]);
@@ -241,13 +239,6 @@ const AccountSettings = () => {
           setTheme(preferences.theme);
           showToast(`Switched to ${preferences.theme} mode!`, 'success');
         }
-        
-        // Apply language change immediately
-        if (preferences.language !== user?.preferences?.language) {
-          // Update the document language attribute
-          document.documentElement.lang = preferences.language;
-          showToast('Language preference saved. Some changes may require a page refresh.', 'info');
-        }
       } else {
         const errorData = await response.json();
         showToast(errorData.error || 'Failed to update preferences', 'error');
@@ -263,25 +254,6 @@ const AccountSettings = () => {
   const handleThemeChange = (newTheme) => {
     setPreferences({ ...preferences, theme: newTheme });
     setTheme(newTheme); // Apply immediately
-  };
-
-  // Function to get language display name
-  const getLanguageDisplayName = (langCode) => {
-    const languages = {
-      'en': 'English',
-      'es': 'Español',
-      'fr': 'Français', 
-      'de': 'Deutsch',
-      'it': 'Italiano',
-      'pt': 'Português',
-      'ru': 'Русский',
-      'ja': '日本語',
-      'ko': '한국어',
-      'zh': '中文',
-      'ar': 'العربية',
-      'hi': 'हिंदी'
-    };
-    return languages[langCode] || langCode;
   };
 
   // Function to get current timezone dynamically
@@ -609,7 +581,7 @@ const AccountSettings = () => {
                           onChange={(e) => setPreferences({ ...preferences, emailNotifications: e.target.checked })}
                           className="sr-only peer"
                         />
-                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                       </label>
                     </div>
 
@@ -625,7 +597,7 @@ const AccountSettings = () => {
                           onChange={(e) => setPreferences({ ...preferences, securityNotifications: e.target.checked })}
                           className="sr-only peer"
                         />
-                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                       </label>
                     </div>
 
@@ -641,7 +613,7 @@ const AccountSettings = () => {
                           onChange={(e) => setPreferences({ ...preferences, marketingEmails: e.target.checked })}
                           className="sr-only peer"
                         />
-                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                       </label>
                     </div>
                   </div>
@@ -679,33 +651,6 @@ const AccountSettings = () => {
                             <span>Dark</span>
                           </button>
                         </div>
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                          Interface Language
-                        </label>
-                        <select
-                          value={preferences.language}
-                          onChange={(e) => setPreferences({ ...preferences, language: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors duration-200"
-                        >
-                          <option value="en">🇺🇸 English</option>
-                          <option value="es">🇪🇸 Español</option>
-                          <option value="fr">🇫🇷 Français</option>
-                          <option value="de">🇩🇪 Deutsch</option>
-                          <option value="it">🇮🇹 Italiano</option>
-                          <option value="pt">🇵🇹 Português</option>
-                          <option value="ru">🇷🇺 Русский</option>
-                          <option value="ja">🇯🇵 日本語</option>
-                          <option value="ko">🇰🇷 한국어</option>
-                          <option value="zh">🇨🇳 中文</option>
-                          <option value="ar">🇸🇦 العربية</option>
-                          <option value="hi">🇮🇳 हिंदी</option>
-                        </select>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 transition-colors duration-200">
-                          Changes will take effect after saving preferences
-                        </p>
                       </div>
                     </div>
                   </div>
@@ -796,14 +741,6 @@ const AccountSettings = () => {
                         <span className="text-gray-900 dark:text-white transition-colors duration-200">{formatTimezone(getCurrentTimezone())}</span>
                       </div>
                     </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">Language Preference</label>
-                      <div className="flex items-center space-x-2">
-                        <Globe className="h-4 w-4 text-gray-400" />
-                        <span className="text-gray-900 dark:text-white transition-colors duration-200">{getLanguageDisplayName(preferences.language)}</span>
-                      </div>
-                    </div>
                   </div>
 
                   {user?.subscription && user.subscription.plan !== 'none' && (
@@ -834,18 +771,18 @@ const AccountSettings = () => {
 
               {/* Danger Zone */}
               <div className="border-t border-gray-200 pt-6">
-                <h3 className="text-lg font-medium text-red-900 dark:text-red-400 mb-4">Danger Zone</h3>
-                <div className="border border-red-200 rounded-lg p-6 bg-red-50 dark:bg-red-800">
+                <h3 className="text-lg font-medium text-red-900 dark:text-red-400/70 mb-4">Danger Zone</h3>
+                <div className="border border-red-200 dark:border-red-900/50 rounded-lg p-6 bg-red-50 dark:bg-red-950/20">
                   <div className="flex items-start space-x-3">
-                    <AlertTriangle className="h-5 w-5 text-red-600 mt-0.5" />
+                    <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-500/70 mt-0.5" />
                     <div className="flex-1">
-                      <h4 className="font-medium text-red-900 dark:text-red-400">Delete Account</h4>
-                      <p className="text-sm text-red-700 dark:text-red-300 mt-1">
+                      <h4 className="font-medium text-red-900 dark:text-red-300/80">Delete Account</h4>
+                      <p className="text-sm text-red-700 dark:text-red-400/60 mt-1">
                         Permanently delete your account and all associated data. This action cannot be undone.
                       </p>
                       <button
                         onClick={handleDeleteAccount}
-                        className="mt-3 bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 flex items-center space-x-2 text-sm"
+                        className="mt-3 bg-red-600 dark:bg-red-800/70 text-white px-4 py-2 rounded-md hover:bg-red-700 dark:hover:bg-red-700/80 flex items-center space-x-2 text-sm transition-colors"
                       >
                         <Trash2 className="h-4 w-4" />
                         <span>Delete Account</span>

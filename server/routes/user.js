@@ -139,7 +139,7 @@ router.post('/profile/update', authenticateToken, async (req, res) => {
       db.logAction(userId, 'profile_updated', 'profile', userId, { 
         fields: Object.keys(updateData),
         updatedBy: req.user.username 
-      }, clientIP);
+      }, clientIP, userId);
 
       res.json({ 
         message: 'Profile updated successfully',
@@ -221,7 +221,7 @@ router.post('/password/change', authenticateToken, async (req, res) => {
       // Log the action
       db.logAction(userId, 'password_changed', 'security', userId, { 
         changedBy: req.user.username 
-      }, clientIP);
+      }, clientIP, userId);
 
       console.log(`Password successfully changed for user: ${user.username}`);
       res.json({ message: 'Password changed successfully' });
@@ -257,7 +257,7 @@ router.post('/preferences/update', authenticateToken, async (req, res) => {
       db.logAction(userId, 'preferences_updated', 'preferences', userId, { 
         preferences,
         updatedBy: req.user.username 
-      }, clientIP);
+      }, clientIP, userId);
 
       res.json({ 
         message: 'Preferences updated successfully',
@@ -321,7 +321,7 @@ router.delete('/sessions/:sessionId/terminate', authenticateToken, async (req, r
           userAgent: session.user_agent
         },
         terminatedBy: req.user.username 
-      }, clientIP);
+      }, clientIP, userId);
 
       res.json({ message: 'Session terminated successfully' });
     } else {
@@ -357,7 +357,7 @@ router.get('/data/export', authenticateToken, async (req, res) => {
     // Log the action
     db.logAction(userId, 'data_exported', 'privacy', userId, { 
       exportedBy: req.user.username 
-    }, clientIP);
+    }, clientIP, userId);
 
     // Set headers for file download
     res.setHeader('Content-Type', 'application/json');
@@ -393,14 +393,11 @@ router.delete('/account/delete', authenticateToken, async (req, res) => {
       }
     }
 
-    // Log the action before deletion
-    db.logAction(userId, 'account_deleted', 'account', userId, { 
+    // Delete the user account (this will now handle audit logging internally)
+    const result = await db.deleteUserWithAudit(userId, {
       deletedBy: req.user.username,
       userRole: req.user.role
     }, clientIP);
-
-    // Delete the user account
-    const result = await db.deleteUser(userId);
     
     if (result) {
       res.json({ message: 'Account deleted successfully' });

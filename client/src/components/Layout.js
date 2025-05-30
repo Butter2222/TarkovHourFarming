@@ -95,13 +95,13 @@ const Layout = ({ children }) => {
               {user?.uuid && (
                 <div className="flex md:hidden items-center space-x-1 text-xs text-gray-500 dark:text-gray-400">
                   <span className="font-mono">{user.uuid}</span>
-                  <button
+                  <div
                     onClick={() => copyToClipboard(user.uuid, 'Account ID')}
-                    className="text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-colors duration-200"
+                    className="text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-colors duration-200 cursor-pointer"
                     title="Copy Account ID"
                   >
                     <Copy className="h-3 w-3" />
-                  </button>
+                  </div>
                 </div>
               )}
               
@@ -125,16 +125,16 @@ const Layout = ({ children }) => {
                             <span className="text-xs font-mono text-gray-500 dark:text-gray-400 transition-colors duration-200">
                               {user.uuid}
                             </span>
-                            <button
+                            <div
                               onClick={(e) => {
                                 e.stopPropagation();
                                 copyToClipboard(user.uuid, 'Account ID');
                               }}
-                              className="text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-colors duration-200"
+                              className="text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400 transition-colors duration-200 cursor-pointer"
                               title="Copy Account ID"
                             >
                               <Copy className="h-3 w-3" />
-                            </button>
+                            </div>
                           </div>
                         </>
                       )}
