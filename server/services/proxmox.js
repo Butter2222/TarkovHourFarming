@@ -1,0 +1,207 @@
+const axios = require('axios');
+const https = require('https');
+
+class ProxmoxService {
+  constructor() {
+    this.host = process.env.PROXMOX_HOST;
+    this.username = process.env.PROXMOX_USERNAME;
+    this.password = process.env.PROXMOX_PASSWORD;
+    this.node = process.env.PROXMOX_NODE;
+    this.ticket = null;
+    this.csrfToken = null;
+    this.ticketExpiry = null;
+
+    // Create axios instance with SSL verification disabled (for self-signed certs)
+    this.client = axios.create({
+      baseURL: this.host,
+      timeout: 30000,
+      httpsAgent: new https.Agent({
+        rejectUnauthorized: false
+      })
+    });
+  }
+
+  async authenticate() {
+    try {
+      const response = await this.client.post('/api2/json/access/ticket', {
+        username: this.username,
+        password: this.password
+      });
+
+      if (response.data && response.data.data) {
+        this.ticket = response.data.data.ticket;
+        this.csrfToken = response.data.data.CSRFPreventionToken;
+        // Proxmox tickets are valid for 2 hours
+        this.ticketExpiry = Date.now() + (2 * 60 * 60 * 1000);
+        
+        // Set default headers for authenticated requests
+        this.client.defaults.headers.common['Cookie'] = `PVEAuthCookie=${this.ticket}`;
+        this.client.defaults.headers.common['CSRFPreventionToken'] = this.csrfToken;
+        
+        console.log('✅ Proxmox authentication successful');
+        return true;
+      }
+      throw new Error('Authentication failed - no ticket received');
+    } catch (error) {
+      console.error('❌ Proxmox authentication failed:', error.message);
+      throw new Error(`Proxmox authentication failed: ${error.message}`);
+    }
+  }
+
+  async ensureAuthenticated() {
+    if (!this.ticket || !this.ticketExpiry || Date.now() >= this.ticketExpiry) {
+      await this.authenticate();
+    }
+  }
+
+  async getVMs() {
+    await this.ensureAuthenticated();
+    try {
+      const response = await this.client.get(`/api2/json/nodes/${this.node}/qemu`);
+      return response.data.data || [];
+    } catch (error) {
+      console.error('Error fetching VMs:', error.message);
+      throw new Error(`Failed to fetch VMs: ${error.message}`);
+    }
+  }
+
+  async getVMStatus(vmid) {
+    await this.ensureAuthenticated();
+    try {
+      const response = await this.client.get(`/api2/json/nodes/${this.node}/qemu/${vmid}/status/current`);
+      return response.data.data;
+    } catch (error) {
+      console.error(`Error fetching VM ${vmid} status:`, error.message);
+      throw new Error(`Failed to fetch VM status: ${error.message}`);
+    }
+  }
+
+  async startVM(vmid) {
+    await this.ensureAuthenticated();
+    try {
+      const response = await this.client.post(`/api2/json/nodes/${this.node}/qemu/${vmid}/status/start`);
+      return response.data.data;
+    } catch (error) {
+      console.error(`Error starting VM ${vmid}:`, error.message);
+      throw new Error(`Failed to start VM: ${error.message}`);
+    }
+  }
+
+  async stopVM(vmid) {
+    await this.ensureAuthenticated();
+    try {
+      const response = await this.client.post(`/api2/json/nodes/${this.node}/qemu/${vmid}/status/stop`);
+      return response.data.data;
+    } catch (error) {
+      console.error(`Error stopping VM ${vmid}:`, error.message);
+      throw new Error(`Failed to stop VM: ${error.message}`);
+    }
+  }
+
+  async shutdownVM(vmid) {
+    await this.ensureAuthenticated();
+    try {
+      const response = await this.client.post(`/api2/json/nodes/${this.node}/qemu/${vmid}/status/shutdown`);
+      return response.data.data;
+    } catch (error) {
+      console.error(`Error shutting down VM ${vmid}:`, error.message);
+      throw new Error(`Failed to shutdown VM: ${error.message}`);
+    }
+  }
+
+  async rebootVM(vmid) {
+    await this.ensureAuthenticated();
+    try {
+      const response = await this.client.post(`/api2/json/nodes/${this.node}/qemu/${vmid}/status/reboot`);
+      return response.data.data;
+    } catch (error) {
+      console.error(`Error rebooting VM ${vmid}:`, error.message);
+      throw new Error(`Failed to reboot VM: ${error.message}`);
+    }
+  }
+
+  async getVMConfig(vmid) {
+    await this.ensureAuthenticated();
+    try {
+      const response = await this.client.get(`/api2/json/nodes/${this.node}/qemu/${vmid}/config`);
+      return response.data.data;
+    } catch (error) {
+      console.error(`Error fetching VM ${vmid} config:`, error.message);
+      throw new Error(`Failed to fetch VM config: ${error.message}`);
+    }
+  }
+
+  async getNodeStatus() {
+    await this.ensureAuthenticated();
+    try {
+      const response = await this.client.get(`/api2/json/nodes/${this.node}/status`);
+      return response.data.data;
+    } catch (error) {
+      console.error(`Error fetching node status:`, error.message);
+      throw new Error(`Failed to fetch node status: ${error.message}`);
+    }
+  }
+
+  async getNodeInfo() {
+    await this.ensureAuthenticated();
+    try {
+      // Get both status and version info
+      const [statusResponse, versionResponse] = await Promise.all([
+        this.client.get(`/api2/json/nodes/${this.node}/status`),
+        this.client.get(`/api2/json/version`)
+      ]);
+
+      const status = statusResponse.data.data;
+      const version = versionResponse.data.data;
+
+      return {
+        node: this.node,
+        status: status.pveversion ? 'online' : 'unknown',
+        
+        // CPU info
+        cpu: {
+          usage: status.cpu ? Math.round(status.cpu * 100) : 0,
+          cores: status.cpuinfo ? status.cpuinfo.cpus : 'N/A'
+        },
+
+        // Memory info (convert from bytes to GB)
+        memory: {
+          used: status.memory ? Math.round(status.memory.used / 1024 / 1024 / 1024 * 100) / 100 : 0,
+          total: status.memory ? Math.round(status.memory.total / 1024 / 1024 / 1024 * 100) / 100 : 0,
+          usage: status.memory ? Math.round((status.memory.used / status.memory.total) * 100) : 0
+        },
+
+        // Uptime (convert seconds to human readable)
+        uptime: status.uptime ? this.formatUptime(status.uptime) : 'Unknown',
+        uptimeSeconds: status.uptime || 0,
+
+        // IO delay and load average
+        iowait: status.wait ? Math.round(status.wait * 100) / 100 : 0,
+        loadavg: status.loadavg ? status.loadavg : [0, 0, 0],
+
+        // Additional info
+        pveVersion: status.pveversion || 'Unknown',
+        kernelVersion: status.kversion || 'Unknown'
+      };
+    } catch (error) {
+      console.error(`Error fetching node info:`, error.message);
+      throw new Error(`Failed to fetch node info: ${error.message}`);
+    }
+  }
+
+  formatUptime(seconds) {
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+
+    if (days > 0) {
+      return `${days}d ${hours}h ${minutes}m`;
+    } else if (hours > 0) {
+      return `${hours}h ${minutes}m`;
+    } else {
+      return `${minutes}m`;
+    }
+  }
+}
+
+module.exports = new ProxmoxService(); 

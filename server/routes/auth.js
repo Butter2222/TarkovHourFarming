@@ -1,0 +1,182 @@
+const express = require('express');
+const { generateToken, authenticateToken } = require('../middleware/auth');
+const db = require('../services/database');
+
+const router = express.Router();
+
+// Login endpoint
+router.post('/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const clientIP = req.ip || req.connection.remoteAddress;
+    
+    console.log('Login attempt:', { username, passwordLength: password?.length, ip: clientIP });
+
+    if (!username || !password) {
+      console.log('Missing credentials');
+      return res.status(400).json({ error: 'Username and password are required' });
+    }
+
+    // Find user (including suspended/banned users for proper error handling)
+    const user = await db.findUserForLogin(username);
+    console.log('User lookup result:', user ? 'Found' : 'Not found');
+    if (!user) {
+      console.log('User not found:', username);
+      // Log failed attempt
+      db.logAction(null, 'login_failed', 'user', username, { reason: 'user_not_found' }, clientIP);
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Check account status
+    if (user.status === 'banned') {
+      console.log('Banned account login attempt:', username);
+      db.logAction(user.id, 'login_failed', 'user', username, { reason: 'account_banned' }, clientIP);
+      return res.status(403).json({ error: 'Account banned', accountStatus: 'banned' });
+    }
+    
+    if (user.status === 'suspended') {
+      console.log('Suspended account login attempt:', username);
+      db.logAction(user.id, 'login_failed', 'user', username, { reason: 'account_suspended' }, clientIP);
+      return res.status(423).json({ error: 'Account temporarily unavailable', accountStatus: 'suspended' });
+    }
+
+    console.log('Verifying password for user:', username);
+    // Verify password
+    const isValidPassword = await db.verifyPassword(password, user.password);
+    console.log('Password verification result:', isValidPassword);
+    console.log('Stored password hash length:', user.password?.length);
+    console.log('Input password length:', password?.length);
+    
+    if (!isValidPassword) {
+      console.log('Invalid password for user:', username);
+      // Log failed attempt
+      await db.logLoginAttempt(user.id, false, clientIP, req.get('User-Agent'), 'invalid_password');
+      db.logAction(user.id, 'login_failed', 'user', username, { reason: 'invalid_password' }, clientIP);
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    console.log('Login successful for user:', username);
+
+    // Update last login time
+    await db.updateLastLogin(user.id);
+
+    // Log successful login attempt
+    await db.logLoginAttempt(user.id, true, clientIP, req.get('User-Agent'));
+
+    // Generate token
+    const token = generateToken({
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      role: user.role || 'customer'
+    });
+
+    // Log successful login
+    db.logAction(user.id, 'login_success', 'user', username, null, clientIP);
+
+    // Return user data (without password) and token
+    const { password: _, ...userWithoutPassword } = user;
+    res.json({
+      message: 'Login successful',
+      token,
+      user: userWithoutPassword
+    });
+
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Register endpoint
+router.post('/register', async (req, res) => {
+  try {
+    const { username, email, password, vmIds, role, subscriptionPlan, subscriptionExpiresAt, selectedPlan } = req.body;
+    const clientIP = req.ip || req.connection.remoteAddress;
+
+    console.log('Registration attempt:', { username, email, selectedPlan, ip: clientIP });
+
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'Username, email, and password are required' });
+    }
+
+    // For customer registrations from the frontend, use selectedPlan if provided
+    const finalSubscriptionPlan = selectedPlan || subscriptionPlan;
+
+    // Create new user
+    const newUser = await db.createUser({
+      username,
+      email,
+      password,
+      role: role || 'customer',
+      vmIds: vmIds || [],
+      subscriptionPlan: finalSubscriptionPlan,
+      subscriptionExpiresAt
+    });
+
+    console.log('User created successfully:', username);
+
+    // Log user creation
+    db.logAction(newUser.id, 'user_created', 'user', username, { 
+      role: newUser.role, 
+      vmIds: newUser.vmIds,
+      selectedPlan: finalSubscriptionPlan
+    }, clientIP);
+
+    // Return user data (without password)
+    const { password: _, ...userWithoutPassword } = newUser;
+    res.status(201).json({
+      message: 'Account created successfully',
+      user: userWithoutPassword
+    });
+
+  } catch (error) {
+    console.error('Registration error:', error);
+    if (error.message.includes('already exists')) {
+      return res.status(409).json({ error: error.message });
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Validate token endpoint
+router.get('/validate', authenticateToken, async (req, res) => {
+  try {
+    // Get fresh user data from database
+    const user = await db.findUserByIdForAuth(req.user.id);
+    if (!user) {
+      return res.status(401).json({ error: 'User not found' });
+    }
+
+    // Check account status
+    if (user.status === 'banned') {
+      return res.status(403).json({ error: 'Account banned', accountStatus: 'banned' });
+    }
+    
+    if (user.status === 'suspended') {
+      return res.status(423).json({ error: 'Account temporarily unavailable', accountStatus: 'suspended' });
+    }
+
+    // Return user data without password
+    const { password: _, ...userWithoutPassword } = user;
+    res.json({
+      message: 'Token is valid',
+      user: userWithoutPassword
+    });
+  } catch (error) {
+    console.error('Token validation error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Logout endpoint
+router.post('/logout', authenticateToken, (req, res) => {
+  const clientIP = req.ip || req.connection.remoteAddress;
+  
+  // Log logout
+  db.logAction(req.user.id, 'logout', 'user', req.user.username, null, clientIP);
+  
+  res.json({ message: 'Logout successful' });
+});
+
+module.exports = router; 

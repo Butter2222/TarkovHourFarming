@@ -1,0 +1,30 @@
+{
+  "name": "proxwebui",
+  "version": "1.0.0",
+  "description": "Proxmox VM Management Dashboard",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "cd server && npm run dev",
+    "client": "cd client && npm start",
+    "build": "cd client && npm run build",
+    "install-all": "npm install && cd server && npm install && cd ../client && npm install",
+    "deploy": "chmod +x scripts/start.sh && ./scripts/start.sh",
+    "pm2:start": "pm2 start ecosystem.config.js --env production",
+    "pm2:stop": "pm2 stop proxwebui",
+    "pm2:restart": "pm2 restart proxwebui",
+    "pm2:logs": "pm2 logs proxwebui",
+    "pm2:monitor": "pm2 monit"
+  },
+  "keywords": ["proxmox", "vm", "dashboard", "management"],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  }
+} 
