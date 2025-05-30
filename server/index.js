@@ -6,6 +6,13 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 require('dotenv').config();
 
+// Debug environment loading
+console.log('🔍 Environment Debug:');
+console.log('JWT_SECRET loaded:', process.env.JWT_SECRET ? '[SET]' : '[NOT SET]');
+console.log('JWT_SECRET length:', process.env.JWT_SECRET ? process.env.JWT_SECRET.length : 0);
+console.log('Working directory:', process.cwd());
+console.log('__dirname:', __dirname);
+
 const authRoutes = require('./routes/auth');
 const vmRoutes = require('./routes/vm');
 const userRoutes = require('./routes/user');
