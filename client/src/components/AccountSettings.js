@@ -17,7 +17,8 @@ import {
   Copy,
   Calendar,
   Crown,
-  Loader2
+  Loader2,
+  Trash2
 } from 'lucide-react';
 import Toast from './Toast';
 import ConfirmModal from './ConfirmModal';
