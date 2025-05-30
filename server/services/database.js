@@ -168,6 +168,25 @@ class DatabaseService {
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
       );
 
+      -- VM Setup tracking table
+      CREATE TABLE IF NOT EXISTS vm_setup (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        plan_type TEXT NOT NULL, -- hour_booster, dual_mode, kd_drop
+        vm_count INTEGER NOT NULL,
+        vm_ids TEXT, -- JSON array of VM IDs
+        status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'setup_in_progress', 'file_uploaded', 'completed', 'failed')),
+        setup_data TEXT, -- JSON data for setup progress
+        hwho_file_path TEXT, -- Path to uploaded hwho.dat file
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        completed_at DATETIME,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vm_setup_user_id ON vm_setup(user_id);
+      CREATE INDEX IF NOT EXISTS idx_vm_setup_status ON vm_setup(status);
+
       -- Indexes for better performance
       CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id);
       CREATE INDEX IF NOT EXISTS idx_payments_stripe_payment_intent_id ON payments(stripe_payment_intent_id);
@@ -188,25 +207,6 @@ class DatabaseService {
       
       CREATE INDEX IF NOT EXISTS idx_payment_disputes_user_id ON payment_disputes(user_id);
       CREATE INDEX IF NOT EXISTS idx_payment_disputes_status ON payment_disputes(status);
-
-      -- VM Setup tracking table
-      CREATE TABLE IF NOT EXISTS vm_setup (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        plan_type TEXT NOT NULL, -- hour_booster, dual_mode, kd_drop
-        vm_count INTEGER NOT NULL,
-        vm_ids TEXT, -- JSON array of VM IDs
-        status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'setup_in_progress', 'file_uploaded', 'completed', 'failed')),
-        setup_data TEXT, -- JSON data for setup progress
-        hwho_file_path TEXT, -- Path to uploaded hwho.dat file
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        completed_at DATETIME,
-        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_vm_setup_user_id ON vm_setup(user_id);
-      CREATE INDEX IF NOT EXISTS idx_vm_setup_status ON vm_setup(status);
     `);
     
     // Ensure status column exists (migration for existing databases)
@@ -257,11 +257,86 @@ class DatabaseService {
       }
     }
     
+    // Add missing columns migration BEFORE preparing statements
+    this.addMissingColumns();
+    
     // Prepare common statements
     this.prepareStatements();
     
     // Initialize account settings schema
     this.initializeAccountSettingsSchema();
+  }
+  
+  addMissingColumns() {
+    // Add updated_at column to users table if it doesn't exist
+    try {
+      this.db.exec(`ALTER TABLE users ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+      console.log('✅ Added updated_at column to users table');
+    } catch (error) {
+      if (!error.message.includes('duplicate column name')) {
+        console.error('❌ Error adding updated_at column to users:', error);
+      }
+    }
+
+    // Add updated_at column to vm_assignments table if it doesn't exist
+    try {
+      this.db.exec(`ALTER TABLE vm_assignments ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+      console.log('✅ Added updated_at column to vm_assignments table');
+    } catch (error) {
+      if (!error.message.includes('duplicate column name')) {
+        console.error('❌ Error adding updated_at column to vm_assignments:', error);
+      }
+    }
+
+    // Add updated_at column to sessions table if it doesn't exist
+    try {
+      this.db.exec(`ALTER TABLE sessions ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+      console.log('✅ Added updated_at column to sessions table');
+    } catch (error) {
+      if (!error.message.includes('duplicate column name')) {
+        console.error('❌ Error adding updated_at column to sessions:', error);
+      }
+    }
+
+    // Add updated_at column to audit_logs table if it doesn't exist
+    try {
+      this.db.exec(`ALTER TABLE audit_logs ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+      console.log('✅ Added updated_at column to audit_logs table');
+    } catch (error) {
+      if (!error.message.includes('duplicate column name')) {
+        console.error('❌ Error adding updated_at column to audit_logs:', error);
+      }
+    }
+
+    // For tables that should already have updated_at (payments, refunds, payment_disputes)
+    // these should be created with updated_at in the main CREATE TABLE, but let's ensure
+    // they exist for older databases
+    try {
+      this.db.exec(`ALTER TABLE payments ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+      console.log('✅ Added updated_at column to payments table');
+    } catch (error) {
+      if (!error.message.includes('duplicate column name')) {
+        console.error('❌ Error adding updated_at column to payments:', error);
+      }
+    }
+
+    try {
+      this.db.exec(`ALTER TABLE refunds ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+      console.log('✅ Added updated_at column to refunds table');
+    } catch (error) {
+      if (!error.message.includes('duplicate column name')) {
+        console.error('❌ Error adding updated_at column to refunds:', error);
+      }
+    }
+
+    try {
+      this.db.exec(`ALTER TABLE payment_disputes ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP`);
+      console.log('✅ Added updated_at column to payment_disputes table');
+    } catch (error) {
+      if (!error.message.includes('duplicate column name')) {
+        console.error('❌ Error adding updated_at column to payment_disputes:', error);
+      }
+    }
   }
   
   prepareStatements() {
