@@ -5,10 +5,11 @@ import VMCard from './VMCard';
 import VMSetup from './VMSetup';
 import DashboardStats from './DashboardStats';
 import ServerOverview from './ServerOverview';
-import { RefreshCw, AlertCircle, Monitor, Loader2, CheckCircle, Clock, Cpu, HardDrive, CreditCard, Server, Users, BarChart3, Settings, Play } from 'lucide-react';
+import { RefreshCw, AlertCircle, Monitor, Loader2, CheckCircle, Clock, Cpu, HardDrive, CreditCard, Server, Users, BarChart3, Settings, Play, Activity } from 'lucide-react';
 import SubscriptionManager from './SubscriptionManager';
 import AdminPanel from './AdminPanel';
 import Analytics from './Analytics';
+import SystemMonitoringModal from './SystemMonitoringModal';
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -29,6 +30,21 @@ const Dashboard = () => {
   const [fetchingStats, setFetchingStats] = useState(false);
   const [fetchingServerStats, setFetchingServerStats] = useState(false);
   const [lastFetchTime, setLastFetchTime] = useState(0);
+
+  // Monitoring state
+  const [monitoringData, setMonitoringData] = useState({
+    systemHealth: null,
+    vmProvisioning: null,
+    webhooks: null,
+    userActivity: null,
+    loading: {
+      systemHealth: false,
+      vmProvisioning: false, 
+      webhooks: false,
+      userActivity: false
+    }
+  });
+  const [activeMonitoringTab, setActiveMonitoringTab] = useState('system');
 
   const fetchVMs = async () => {
     // Prevent infinite loops - don't fetch if already fetching or fetched recently
@@ -191,6 +207,36 @@ const Dashboard = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  // Monitoring functions
+  const fetchMonitoringData = async (type) => {
+    setMonitoringData(prev => ({
+      ...prev,
+      loading: { ...prev.loading, [type]: true }
+    }));
+
+    try {
+      const response = await api.get(`/admin/monitoring/${type === 'system' ? 'system-health' : type === 'provisioning' ? 'vm-provisioning' : type === 'webhooks' ? 'webhooks' : 'user-activity'}`);
+      
+      if (response.data) {
+        setMonitoringData(prev => ({
+          ...prev,
+          [type === 'system' ? 'systemHealth' : type === 'provisioning' ? 'vmProvisioning' : type === 'webhooks' ? 'webhooks' : 'userActivity']: response.data
+        }));
+      }
+    } catch (error) {
+      console.error(`Error fetching ${type} data:`, error);
+    } finally {
+      setMonitoringData(prev => ({
+        ...prev,
+        loading: { ...prev.loading, [type]: false }
+      }));
+    }
+  };
+
+  const refreshMonitoringData = () => {
+    fetchMonitoringData(activeMonitoringTab);
+  };
+
   const tabs = [
     { id: 'vms', label: 'Virtual Machines', icon: Monitor },
     { id: 'subscription', label: 'Subscription', icon: CreditCard }
@@ -200,6 +246,7 @@ const Dashboard = () => {
   if (user?.role === 'admin') {
     tabs.push({ id: 'admin', label: 'User Management', icon: Users });
     tabs.push({ id: 'analytics', label: 'Analytics', icon: BarChart3 });
+    tabs.push({ id: 'system-monitoring', label: 'System Monitor', icon: Activity });
   }
 
   const renderVMDashboard = () => (
@@ -376,7 +423,7 @@ const Dashboard = () => {
       </div>
 
       {/* Stats */}
-      {stats && <DashboardStats stats={stats} />}
+      {stats && <DashboardStats stats={{...stats, userRole: stats.role || user?.role}} />}
 
       {/* Server Overview - Admin Only */}
       {user?.role === 'admin' && <ServerOverview />}
@@ -400,7 +447,13 @@ const Dashboard = () => {
           {tabs.map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => {
+                setActiveTab(tab.id);
+                // Load monitoring data when system monitoring tab is clicked
+                if (tab.id === 'system-monitoring' && !monitoringData.systemHealth) {
+                  fetchMonitoringData('system');
+                }
+              }}
               className={`py-2 px-1 border-b-2 font-medium text-sm flex items-center transition-colors duration-200 ${
                 activeTab === tab.id
                   ? 'border-blue-500 text-blue-600 dark:text-blue-400'
@@ -419,6 +472,20 @@ const Dashboard = () => {
       {activeTab === 'subscription' && <SubscriptionManager />}
       {activeTab === 'admin' && <AdminPanel />}
       {activeTab === 'analytics' && <Analytics />}
+      {activeTab === 'system-monitoring' && (
+        <SystemMonitoringModal
+          show={true}
+          onClose={() => {}} // No close needed since it's in a tab
+          monitoringData={monitoringData}
+          activeTab={activeMonitoringTab}
+          onTabChange={(tab) => {
+            setActiveMonitoringTab(tab);
+            fetchMonitoringData(tab);
+          }}
+          onRefresh={refreshMonitoringData}
+          embedded={true} // Tell component it's embedded in tab
+        />
+      )}
 
       {/* VM Setup Modal */}
       {showSetup && (

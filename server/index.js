@@ -3,6 +3,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
+const session = require('express-session');
+const SQLiteStore = require('connect-sqlite3')(session);
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
@@ -125,6 +127,26 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+
+// Session configuration for secure authentication
+app.use(session({
+  store: new SQLiteStore({
+    db: 'sessions.db',
+    dir: path.join(__dirname, 'data'),
+    table: 'sessions'
+  }),
+  secret: process.env.SESSION_SECRET || 'fallback-secret-change-in-production',
+  name: 'sessionId',
+  resave: false,
+  saveUninitialized: false,
+  rolling: true, // Reset expiration on activity
+  cookie: {
+    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+    httpOnly: true, // Prevent XSS
+    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax' // CSRF protection
+  }
+}));
 
 // Body parsing middleware
 // Special handling for Stripe webhook - needs raw body

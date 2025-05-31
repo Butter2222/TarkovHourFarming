@@ -16,6 +16,14 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [loading, setLoading] = useState(true);
 
+  // Function to clear authentication state completely
+  const clearAuthState = () => {
+    localStorage.removeItem('token');
+    setToken(null);
+    setUser(null);
+    delete api.defaults.headers.common['Authorization'];
+  };
+
   useEffect(() => {
     const initAuth = async () => {
       if (token) {
@@ -28,10 +36,16 @@ export const AuthProvider = ({ children }) => {
           setUser(response.data.user);
         } catch (error) {
           console.error('Token validation failed:', error);
-          // Remove invalid token
-          localStorage.removeItem('token');
-          setToken(null);
-          delete api.defaults.headers.common['Authorization'];
+          
+          // Check for session security violation
+          if (error.response?.data?.code === 'SESSION_MISMATCH') {
+            console.error('SECURITY ALERT: Session mismatch detected. Clearing all authentication data.');
+            // Show security alert to user
+            alert('Security violation detected. You have been logged out for your safety. Please log in again.');
+          }
+          
+          // Remove invalid token and clear state
+          clearAuthState();
         }
       }
       setLoading(false);
@@ -75,10 +89,7 @@ export const AuthProvider = ({ children }) => {
       console.error('Logout API call failed:', error);
     } finally {
       // Clear local state regardless of API call result
-      localStorage.removeItem('token');
-      setToken(null);
-      setUser(null);
-      delete api.defaults.headers.common['Authorization'];
+      clearAuthState();
     }
   };
 

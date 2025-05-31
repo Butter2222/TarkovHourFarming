@@ -44,12 +44,17 @@ function getSetupMessage(reason) {
 
 // Helper function to check if user has active subscription
 const hasActiveSubscription = (user) => {
+  // Admins always have access regardless of subscription
+  if (user.role === 'admin') {
+    return true;
+  }
+  
   if (!user.subscription || user.subscription.plan === 'none' || !user.subscription.plan) {
     return false;
   }
   
   if (!user.subscription.expiresAt) {
-    // No expiration date means it's active (lifetime or admin)
+    // No expiration date means it's active (lifetime)
     return true;
   }
   
@@ -332,43 +337,70 @@ router.get('/:vmid', authenticateToken, async (req, res) => {
 // Start VM
 router.post('/:vmid/start', authenticateToken, async (req, res) => {
   try {
-    const vmid = parseInt(req.params.vmid);
+    const { vmid } = req.params;
     const userId = req.user.id;
-    const clientIP = req.ip || req.connection.remoteAddress;
 
-    if (!db.canAccessVM(userId, vmid)) {
-      return res.status(403).json({ error: 'Access denied to this VM' });
+    // Check if VM is assigned to user
+    const userVMs = db.getUserVMs(userId);
+    if (!userVMs.includes(parseInt(vmid))) {
+      return res.status(403).json({ error: 'VM not assigned to user' });
     }
 
+    // Check if user has active subscription (CRITICAL for start operations)
     const user = await db.findUserById(userId);
-    
-    // Check subscription requirement for VM start
-    if (!canPerformVMOperations(user)) {
+    if (!hasActiveSubscription(user)) {
       return res.status(403).json({ 
-        error: 'Active subscription required to start VMs. Please subscribe to a plan or contact support.',
+        error: 'Active subscription required to start VMs. Please renew your subscription to continue.',
         code: 'SUBSCRIPTION_REQUIRED',
-        allowedOperations: ['shutdown', 'stop'],
-        subscribePath: '/dashboard/subscription'
+        requiresSubscription: true
+      });
+    }
+
+    // Check if VMs were marked as destroyed or shutdown due to expired subscription
+    let subscriptionData = {};
+    if (user.subscription_data) {
+      try {
+        subscriptionData = JSON.parse(user.subscription_data);
+      } catch (e) {
+        console.error('Error parsing subscription data:', e);
+      }
+    }
+
+    // Prevent starting VMs that were shutdown due to subscription issues
+    if (subscriptionData.vmsShutdownOnExpiry || subscriptionData.vmsShutdownOnNoSub) {
+      return res.status(403).json({ 
+        error: 'VM access restricted due to previous subscription expiry. Please contact support if you believe this is an error.',
+        code: 'VM_ACCESS_RESTRICTED',
+        requiresSubscription: true
+      });
+    }
+
+    // If VMs were destroyed, they can't be started
+    if (subscriptionData.vmsDestroyed) {
+      return res.status(410).json({ 
+        error: 'This VM was destroyed due to extended subscription expiry. Please purchase a new subscription to get new VMs.',
+        code: 'VM_DESTROYED',
+        requiresSubscription: true
       });
     }
 
     const result = await proxmoxService.startVM(vmid);
     
     // Log the action
-    db.logAction(userId, 'vm_start', 'vm', vmid.toString(), { taskId: result }, clientIP, userId);
+    const clientIP = req.ip || req.connection.remoteAddress;
+    db.logAction(userId, 'vm_started', 'vm', vmid, { status: 'success' }, clientIP);
     
-    res.json({
-      message: `VM ${vmid} start command sent successfully`,
-      vmid,
-      taskId: result,
-      action: 'start'
-    });
-
+    res.json({ message: 'VM started successfully', data: result });
   } catch (error) {
     console.error(`Error starting VM ${req.params.vmid}:`, error);
+    
     // Log the failed action
-    db.logAction(req.user.id, 'vm_start_failed', 'vm', req.params.vmid, { error: error.message }, req.ip, req.user.id);
-    res.status(500).json({ error: 'Failed to start VM' });
+    const clientIP = req.ip || req.connection.remoteAddress;
+    db.logAction(req.user.id, 'vm_start_failed', 'vm', req.params.vmid, { 
+      error: error.message 
+    }, clientIP);
+    
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -437,43 +469,70 @@ router.post('/:vmid/shutdown', authenticateToken, async (req, res) => {
 // Reboot VM
 router.post('/:vmid/reboot', authenticateToken, async (req, res) => {
   try {
-    const vmid = parseInt(req.params.vmid);
+    const { vmid } = req.params;
     const userId = req.user.id;
-    const clientIP = req.ip || req.connection.remoteAddress;
 
-    if (!db.canAccessVM(userId, vmid)) {
-      return res.status(403).json({ error: 'Access denied to this VM' });
+    // Check if VM is assigned to user
+    const userVMs = db.getUserVMs(userId);
+    if (!userVMs.includes(parseInt(vmid))) {
+      return res.status(403).json({ error: 'VM not assigned to user' });
     }
 
+    // Check if user has active subscription (CRITICAL for reboot operations)
     const user = await db.findUserById(userId);
-    
-    // Check subscription requirement for VM reboot
-    if (!canPerformVMOperations(user)) {
+    if (!hasActiveSubscription(user)) {
       return res.status(403).json({ 
-        error: 'Active subscription required to reboot VMs. Please subscribe to a plan or contact support.',
+        error: 'Active subscription required to reboot VMs. Please renew your subscription to continue.',
         code: 'SUBSCRIPTION_REQUIRED',
-        allowedOperations: ['shutdown', 'stop'],
-        subscribePath: '/dashboard/subscription'
+        requiresSubscription: true
+      });
+    }
+
+    // Check if VMs were marked as destroyed or shutdown due to expired subscription
+    let subscriptionData = {};
+    if (user.subscription_data) {
+      try {
+        subscriptionData = JSON.parse(user.subscription_data);
+      } catch (e) {
+        console.error('Error parsing subscription data:', e);
+      }
+    }
+
+    // Prevent rebooting VMs that were shutdown due to subscription issues
+    if (subscriptionData.vmsShutdownOnExpiry || subscriptionData.vmsShutdownOnNoSub) {
+      return res.status(403).json({ 
+        error: 'VM access restricted due to previous subscription expiry. Please contact support if you believe this is an error.',
+        code: 'VM_ACCESS_RESTRICTED',
+        requiresSubscription: true
+      });
+    }
+
+    // If VMs were destroyed, they can't be rebooted
+    if (subscriptionData.vmsDestroyed) {
+      return res.status(410).json({ 
+        error: 'This VM was destroyed due to extended subscription expiry. Please purchase a new subscription to get new VMs.',
+        code: 'VM_DESTROYED',
+        requiresSubscription: true
       });
     }
 
     const result = await proxmoxService.rebootVM(vmid);
     
     // Log the action
-    db.logAction(userId, 'vm_reboot', 'vm', vmid.toString(), { taskId: result }, clientIP, userId);
+    const clientIP = req.ip || req.connection.remoteAddress;
+    db.logAction(userId, 'vm_rebooted', 'vm', vmid, { status: 'success' }, clientIP);
     
-    res.json({
-      message: `VM ${vmid} reboot command sent successfully`,
-      vmid,
-      taskId: result,
-      action: 'reboot'
-    });
-
+    res.json({ message: 'VM rebooted successfully', data: result });
   } catch (error) {
     console.error(`Error rebooting VM ${req.params.vmid}:`, error);
+    
     // Log the failed action
-    db.logAction(req.user.id, 'vm_reboot_failed', 'vm', req.params.vmid, { error: error.message }, req.ip, req.user.id);
-    res.status(500).json({ error: 'Failed to reboot VM' });
+    const clientIP = req.ip || req.connection.remoteAddress;
+    db.logAction(req.user.id, 'vm_reboot_failed', 'vm', req.params.vmid, { 
+      error: error.message 
+    }, clientIP);
+    
+    res.status(500).json({ error: error.message });
   }
 });
 

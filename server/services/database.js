@@ -859,21 +859,52 @@ class DatabaseService {
 
     console.log('Updating subscription for user:', userId, subscriptionData);
     
-    // Add timeout to prevent hanging
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Subscription update timeout')), 10000)
-    );
-
     try {
-      return await Promise.race([timeoutPromise, this._performSubscriptionUpdate(userId, subscriptionData)]);
+      // Check database health before proceeding
+      if (!this.isHealthy()) {
+        throw new Error('Database is not healthy - aborting subscription update');
+      }
+
+      // Use immediate transaction mode to prevent race conditions
+      this.db.pragma('synchronous = NORMAL'); // Ensure immediate writes
+      
+      // Create transaction with explicit locks to prevent concurrent updates
+      const updateTransaction = this.db.transaction((userId, subscriptionData) => {
+        // First, lock the user record to prevent concurrent modifications
+        const lockStmt = this.db.prepare('SELECT id FROM users WHERE id = ? FOR UPDATE');
+        const userLock = lockStmt.get(userId);
+        if (!userLock) {
+          throw new Error(`User ${userId} not found or locked`);
+        }
+
+        return this._performSubscriptionUpdate(userId, subscriptionData);
+      });
+      
+      const result = updateTransaction.immediate(userId, subscriptionData);
+      
+      console.log(`Successfully updated subscription for user ${userId}`);
+      return result;
+      
     } catch (error) {
-      console.error('Error updating user subscription:', error);
+      console.error('Critical error updating user subscription:', error);
       console.error('Failed subscription data:', subscriptionData);
-      throw error;
+      console.error('User ID:', userId);
+      
+      // Verify database integrity after error
+      try {
+        const integrityCheck = this.db.pragma('integrity_check');
+        if (integrityCheck[0] !== 'ok') {
+          console.error('DATABASE INTEGRITY CHECK FAILED:', integrityCheck);
+        }
+      } catch (integrityError) {
+        console.error('Cannot perform integrity check:', integrityError);
+      }
+      
+      throw new Error(`Subscription update failed for user ${userId}: ${error.message}`);
     }
   }
 
-  async _performSubscriptionUpdate(userId, subscriptionData) {
+  _performSubscriptionUpdate(userId, subscriptionData) {
     const {
       plan,
       stripeCustomerId,
@@ -885,12 +916,22 @@ class DatabaseService {
     } = subscriptionData;
 
     // Get current user data
-    const user = await this.findUserById(userId);
+    const getUserStmt = this.db.prepare('SELECT * FROM users WHERE id = ?');
+    const user = getUserStmt.get(userId);
     if (!user) {
       throw new Error('User not found');
     }
 
-    console.log('Current user subscription:', user.subscription);
+    // Parse existing subscription data
+    let currentSubscription = {};
+    try {
+      currentSubscription = user.subscription_data ? JSON.parse(user.subscription_data) : {};
+    } catch (error) {
+      console.error('Error parsing existing subscription data:', error);
+      currentSubscription = {};
+    }
+
+    console.log('Current user subscription:', currentSubscription);
 
     // Properly handle date conversion
     const formatDate = (date) => {
@@ -904,7 +945,7 @@ class DatabaseService {
 
     // Merge with existing subscription data
     const updatedSubscription = {
-      ...user.subscription,
+      ...currentSubscription,
       ...(plan && { plan }),
       ...(stripeCustomerId && { stripeCustomerId }),
       ...(stripeSubscriptionId && { stripeSubscriptionId }),
@@ -916,7 +957,7 @@ class DatabaseService {
 
     console.log('Updated subscription data:', updatedSubscription);
 
-    // Update user record with new subscription data
+    // Update user record with new subscription data using prepared statement
     const updateSubscription = this.db.prepare(`
       UPDATE users 
       SET subscription_plan = ?, 
@@ -932,12 +973,12 @@ class DatabaseService {
       userId
     );
 
+    if (result.changes === 0) {
+      throw new Error('Failed to update user subscription - no rows affected');
+    }
+
     console.log(`Updated subscription for user ${userId}:`, updatedSubscription);
     console.log('Database update result:', { changes: result.changes, lastInsertRowid: result.lastInsertRowid });
-
-    // Verify the update by fetching the user again
-    const verifyUser = await this.findUserById(userId);
-    console.log('Verification - updated user subscription:', verifyUser.subscription);
 
     return updatedSubscription;
   }
@@ -1136,49 +1177,66 @@ class DatabaseService {
 
   async getSystemStats() {
     try {
-      // Get user counts
-      const userCountsStmt = this.db.prepare(`
-        SELECT 
-          COUNT(*) as total_users,
-          COUNT(CASE WHEN active = 1 THEN 1 END) as active_users,
-          COUNT(CASE WHEN role = 'admin' THEN 1 END) as admin_users,
-          COUNT(CASE WHEN role = 'customer' THEN 1 END) as customer_users
-        FROM users
-      `);
+      const totalUsers = this.db.prepare('SELECT COUNT(*) as count FROM users WHERE role = "customer"').get().count;
       
-      // Get subscription counts
-      const subscriptionCountsStmt = this.db.prepare(`
-        SELECT 
-          COUNT(CASE WHEN subscription_plan IS NOT NULL AND subscription_plan != 'none' THEN 1 END) as active_subscriptions,
-          COUNT(CASE WHEN subscription_plan = 'Basic' THEN 1 END) as basic_subscriptions,
-          COUNT(CASE WHEN subscription_plan = 'Premium' THEN 1 END) as premium_subscriptions
-        FROM users
-      `);
+      const activeSubscriptions = this.db.prepare(`
+        SELECT COUNT(*) as count FROM users 
+        WHERE subscription_data IS NOT NULL 
+        AND JSON_EXTRACT(subscription_data, '$.status') = 'active'
+        AND JSON_EXTRACT(subscription_data, '$.plan') != 'none'
+      `).get().count;
       
-      // Get recent activity count
-      const recentActivityStmt = this.db.prepare(`
-        SELECT COUNT(*) as recent_logins
-        FROM users 
-        WHERE last_login > datetime('now', '-7 days')
-      `);
-
-      const userCounts = userCountsStmt.get();
-      const subscriptionCounts = subscriptionCountsStmt.get();
-      const recentActivity = recentActivityStmt.get();
-
+      const totalVMAssignments = this.db.prepare('SELECT COUNT(*) as count FROM vm_assignments').get().count;
+      
+      const recentErrors = this.db.prepare(`
+        SELECT COUNT(*) as count FROM audit_logs 
+        WHERE (action LIKE '%failed%' OR action LIKE '%error%') 
+        AND created_at >= datetime('now', '-24 hours')
+      `).get().count;
+      
+      const recentProvisionings = this.db.prepare(`
+        SELECT COUNT(*) as count FROM audit_logs 
+        WHERE action = 'vms_provisioned' 
+        AND created_at >= datetime('now', '-7 days')
+      `).get().count;
+      
       return {
-        ...userCounts,
-        ...subscriptionCounts,
-        ...recentActivity
+        totalUsers,
+        activeSubscriptions,
+        totalVMAssignments,
+        recentErrors,
+        recentProvisionings,
+        lastUpdated: new Date().toISOString()
       };
+      
     } catch (error) {
-      console.error('Error fetching system stats:', error);
-      throw error;
+      console.error('Error getting system statistics:', error);
+      return {
+        totalUsers: 0,
+        activeSubscriptions: 0,
+        totalVMAssignments: 0,
+        recentErrors: 0,
+        recentProvisionings: 0,
+        lastUpdated: new Date().toISOString(),
+        error: error.message
+      };
     }
   }
   
   // Get normalized subscription status for a user
-  getSubscriptionStatus(subscription) {
+  getSubscriptionStatus(subscription, userRole = null) {
+    // Admins always have active access regardless of subscription
+    if (userRole === 'admin') {
+      return {
+        plan: 'admin',
+        status: 'active',
+        isActive: true,
+        isExpired: false,
+        isCancelled: false,
+        expiresAt: null
+      };
+    }
+    
     if (!subscription || !subscription.plan || subscription.plan === 'none') {
       return {
         plan: 'none',

@@ -536,6 +536,21 @@ router.get('/subscription-status', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
     
+    // Admins have full access without subscription requirements
+    if (user.role === 'admin') {
+      return res.json({
+        subscription: {
+          plan: 'admin',
+          status: 'active',
+          expiresAt: null,
+          isActive: true,
+          role: 'admin'
+        },
+        active: true,
+        hasActive: true
+      });
+    }
+    
     let subscriptionData = user.subscription || { plan: 'none', expiresAt: null };
     
     // If user has a Stripe subscription, get latest data
@@ -556,7 +571,8 @@ router.get('/subscription-status', authenticateToken, async (req, res) => {
     
     res.json({
       subscription: subscriptionData,
-      active: isActive
+      active: isActive,
+      hasActive: isActive
     });
     
   } catch (error) {
@@ -946,6 +962,9 @@ async function handleSubscriptionUpdated(subscription) {
 
     // Handle subscription status changes
     if (['active', 'trialing'].includes(subscription.status)) {
+      // Check if this is a subscription renewal (restoring access)
+      await subscriptionManager.handleSubscriptionRenewal(userId);
+      
       // Check if this is a new subscription that needs VM provisioning
       const userVMs = db.getUserVMIds(userId);
       console.log(`User ${userId} currently has ${userVMs.length} VMs:`, userVMs);
@@ -1026,6 +1045,9 @@ async function handleInvoicePaymentSucceeded(invoice) {
   
   const userId = await findUserByStripeCustomer(invoice.customer);
   if (userId && invoice.subscription) {
+    // Check if this is a subscription renewal (restoring access)
+    await subscriptionManager.handleSubscriptionRenewal(userId);
+    
     // Record the payment
     await db.recordPayment({
       userId,

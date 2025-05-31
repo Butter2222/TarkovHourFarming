@@ -120,6 +120,34 @@ class ProxmoxService {
     }
   }
 
+  async destroyVM(vmid) {
+    await this.ensureAuthenticated();
+    try {
+      console.log(`Attempting to destroy VM ${vmid}...`);
+      
+      // First ensure the VM is stopped
+      try {
+        const status = await this.getVMStatus(vmid);
+        if (status.status === 'running') {
+          console.log(`VM ${vmid} is running, stopping it first...`);
+          await this.stopVM(vmid);
+          // Wait for the VM to stop
+          await new Promise(resolve => setTimeout(resolve, 10000));
+        }
+      } catch (statusError) {
+        console.log(`Could not check VM ${vmid} status before destruction:`, statusError.message);
+      }
+      
+      // Destroy the VM (permanently delete)
+      const response = await this.client.delete(`/api2/json/nodes/${this.node}/qemu/${vmid}`);
+      console.log(`VM ${vmid} destroyed successfully`);
+      return response.data.data;
+    } catch (error) {
+      console.error(`Error destroying VM ${vmid}:`, error.message);
+      throw new Error(`Failed to destroy VM: ${error.message}`);
+    }
+  }
+
   async getVMConfig(vmid) {
     await this.ensureAuthenticated();
     try {
@@ -329,6 +357,7 @@ class ProxmoxService {
       const newVmid = await this.getNextAvailableVMID();
       
       // Generate VM name based on user account ID and VM number
+      // userAccountId should be like "OD02BO", resulting in names like "OD02BO-01", "OD02BO-02"
       const vmName = `${userAccountId}-${String(vmNumber).padStart(2, '0')}`;
       
       console.log(`Cloning template ${templateVmid} to VM ${newVmid} (${vmName})`);
@@ -336,7 +365,7 @@ class ProxmoxService {
       // Create linked clone
       const cloneTask = await this.cloneVM(templateVmid, newVmid, vmName, {
         fullClone: false, // linked clone
-        description: `Auto-created VM for user ${userAccountId} - Plan: ${planType}`
+        description: `VM for user ${userAccountId} | Plan: ${planType} | Created: ${new Date().toISOString()}`
       });
       
       // Wait for clone operation to complete
@@ -361,7 +390,9 @@ class ProxmoxService {
         name: vmName,
         status: 'created',
         planType: planType,
-        config: vmConfig
+        config: vmConfig,
+        userAccountId: userAccountId,
+        createdAt: new Date().toISOString()
       };
       
     } catch (error) {

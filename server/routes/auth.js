@@ -54,6 +54,14 @@ router.post('/login', async (req, res) => {
       role: user.role || 'customer'
     });
 
+    // CRITICAL: Initialize session with user data to prevent account mix-ups
+    req.session.userId = user.id;
+    req.session.username = user.username;
+    req.session.role = user.role || 'customer';
+    req.session.loginTimestamp = new Date().toISOString();
+    req.session.lastActivity = new Date().toISOString();
+    req.session.clientIP = clientIP;
+
     // Log successful login
     db.logAction(user.id, 'login_success', 'user', username, null, clientIP, user.id);
 
@@ -164,7 +172,16 @@ router.post('/logout', authenticateToken, async (req, res) => {
     console.log('User not found for logout logging (likely deleted account):', req.user.id);
   }
   
-  res.json({ message: 'Logout successful' });
+  // CRITICAL: Destroy session to prevent account mix-ups
+  req.session.destroy((err) => {
+    if (err) {
+      console.error('Session destruction error:', err);
+      return res.status(500).json({ error: 'Logout failed' });
+    }
+    
+    res.clearCookie('sessionId'); // Clear the session cookie
+    res.json({ message: 'Logout successful' });
+  });
 });
 
 module.exports = router; 

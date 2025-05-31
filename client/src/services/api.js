@@ -28,6 +28,15 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
+    // Handle session security violations immediately
+    if (error.response?.data?.code === 'SESSION_MISMATCH') {
+      console.error('CRITICAL SECURITY ALERT: Session mismatch detected');
+      localStorage.removeItem('token');
+      // Force immediate redirect to login with security message
+      window.location.href = '/login?security=session_mismatch';
+      return Promise.reject(error);
+    }
+
     if (error.response?.status === 401) {
       // Token expired or invalid
       localStorage.removeItem('token');

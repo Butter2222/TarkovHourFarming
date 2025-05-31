@@ -7,7 +7,12 @@ const DashboardStats = ({ stats }) => {
     return new Date(dateString).toLocaleDateString();
   };
 
-  const getSubscriptionStatus = (subscription) => {
+  const getSubscriptionStatus = (subscription, userRole) => {
+    // Admins always have full access
+    if (userRole === 'admin') {
+      return { text: 'Admin Access', color: 'text-purple-600', bg: 'bg-purple-100' };
+    }
+    
     // If no subscription plan at all
     if (!subscription || !subscription.plan || subscription.plan === 'none') {
       return { text: 'No Subscription', color: 'text-gray-600', bg: 'bg-gray-100' };
@@ -29,7 +34,12 @@ const DashboardStats = ({ stats }) => {
     }
   };
 
-  const getSubscriptionDetails = (subscription) => {
+  const getSubscriptionDetails = (subscription, userRole) => {
+    // Admins get special display
+    if (userRole === 'admin') {
+      return { plan: 'Admin', dateText: 'Full Access' };
+    }
+    
     if (!subscription || !subscription.plan || subscription.plan === 'none') {
       return { plan: 'None', dateText: null };
     }
@@ -49,8 +59,8 @@ const DashboardStats = ({ stats }) => {
     return { plan: subscription.plan, dateText };
   };
 
-  const subscriptionStatus = getSubscriptionStatus(stats.subscription);
-  const subscriptionDetails = getSubscriptionDetails(stats.subscription);
+  const subscriptionStatus = getSubscriptionStatus(stats.subscription, stats.userRole);
+  const subscriptionDetails = getSubscriptionDetails(stats.subscription, stats.userRole);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -77,7 +87,7 @@ const DashboardStats = ({ stats }) => {
               <p className="text-lg font-semibold text-gray-900 dark:text-white capitalize transition-colors duration-200">
                 {subscriptionDetails.plan}
               </p>
-              {subscriptionDetails.plan !== 'None' && (
+              {subscriptionDetails.plan !== 'None' && stats.userRole !== 'admin' && (
                 <span className={`px-2 py-1 text-xs font-medium rounded-full ${subscriptionStatus.bg} ${subscriptionStatus.color}`}>
                   {subscriptionStatus.text}
                 </span>

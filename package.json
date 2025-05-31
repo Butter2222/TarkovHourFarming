@@ -17,7 +17,12 @@
     "pm2:logs": "pm2 logs proxwebui",
     "pm2:monitor": "pm2 monit"
   },
-  "keywords": ["proxmox", "vm", "dashboard", "management"],
+  "keywords": [
+    "proxmox",
+    "vm",
+    "dashboard",
+    "management"
+  ],
   "author": "Your Name",
   "license": "MIT",
   "devDependencies": {
@@ -26,5 +31,9 @@
   "engines": {
     "node": ">=16.0.0",
     "npm": ">=8.0.0"
+  },
+  "dependencies": {
+    "connect-sqlite3": "^0.9.15",
+    "express-session": "^1.18.1"
   }
-} 
+}

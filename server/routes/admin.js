@@ -580,6 +580,12 @@ router.post('/users/:userId/assign-subscription', authenticateToken, requireAdmi
       return res.status(400).json({ error: 'Duration type must be "days", "weeks", "months", or "years"' });
     }
 
+    // Check database health before proceeding
+    if (!db.isHealthy()) {
+      console.error('Database health check failed before subscription assignment');
+      return res.status(503).json({ error: 'Database service unavailable. Please try again in a moment.' });
+    }
+
     // Check if user exists
     const user = await db.findUserById(userId);
     if (!user) {
@@ -618,7 +624,7 @@ router.post('/users/:userId/assign-subscription', authenticateToken, requireAdmi
 
     console.log('Calculated expiry date:', expiryDate.toISOString());
 
-    // Update user subscription
+    // Update user subscription with proper error handling
     const subscriptionData = {
       plan: plan,
       status: 'active',
@@ -627,27 +633,117 @@ router.post('/users/:userId/assign-subscription', authenticateToken, requireAdmi
 
     console.log('Calling updateUserSubscription with:', subscriptionData);
 
-    const result = await db.updateUserSubscription(userId, subscriptionData);
+    let subscriptionUpdateResult;
+    try {
+      subscriptionUpdateResult = await db.updateUserSubscription(userId, subscriptionData);
+      console.log('Subscription update result:', subscriptionUpdateResult);
+    } catch (dbError) {
+      console.error('Database error during subscription update:', dbError);
+      
+      // Check if database is still healthy
+      const isHealthyAfterError = db.isHealthy();
+      console.log('Database health after error:', isHealthyAfterError);
+      
+      return res.status(500).json({ 
+        error: 'Failed to update subscription due to database error. Please try again.', 
+        details: isHealthyAfterError ? 'Database is healthy' : 'Database may need attention'
+      });
+    }
 
-    console.log('Subscription update result:', result);
-
-    if (result) {
+    if (subscriptionUpdateResult) {
       // Log the action
-      db.logAction(req.user.id, 'subscription_assigned', 'subscription', plan, {
-        assignedTo: user.username,
-        assignedBy: req.user.username,
-        duration: `${duration} ${durationType}`,
-        expiresAt: expiryDate.toISOString()
-      }, clientIP, req.user.id);
+      try {
+        db.logAction(req.user.id, 'subscription_assigned', 'subscription', plan, {
+          assignedTo: user.username,
+          assignedBy: req.user.username,
+          duration: `${duration} ${durationType}`,
+          expiresAt: expiryDate.toISOString()
+        }, clientIP, req.user.id);
 
-      console.log('Audit log created for subscription assignment');
+        console.log('Audit log created for subscription assignment');
+      } catch (logError) {
+        console.error('Failed to log subscription assignment:', logError);
+        // Continue - don't fail the operation for logging issues
+      }
 
-      // Fetch updated user to verify
-      const updatedUser = await db.findUserById(userId);
-      console.log('Post-assignment verification:', updatedUser.subscription);
+      // Trigger VM provisioning for manual subscription assignment
+      let provisioningMessage = '';
+      try {
+        console.log('Triggering VM provisioning for manual subscription assignment...');
+        
+        // Determine plan type and VM count
+        let planType = 'hour_booster';
+        let vmCount = 1;
+        
+        if (plan.toLowerCase().includes('booster')) {
+          planType = 'hour_booster';
+          vmCount = 1;
+        } else if (plan.toLowerCase().includes('dual')) {
+          planType = 'dual_mode';
+          vmCount = 1;
+        } else if (plan.toLowerCase().includes('kd') || plan.toLowerCase().includes('drop')) {
+          planType = 'kd_drop';
+          vmCount = 1;
+        }
+
+        const vmProvisioning = require('../services/vmProvisioning');
+        const provisioningResult = await vmProvisioning.provisionVMsForUser(userId, {
+          id: `admin-manual-${Date.now()}`,
+          metadata: {
+            planType: planType,
+            vmCount: vmCount.toString(),
+            planName: plan
+          },
+          planType: planType,
+          vmCount: vmCount,
+          planName: plan,
+          nickname: plan
+        });
+
+        console.log('VM provisioning completed for manual assignment:', provisioningResult);
+        provisioningMessage = ` VMs provisioned: ${provisioningResult.vmsCreated?.length || 0}`;
+
+        // Log VM provisioning success
+        try {
+          db.logAction(userId, 'vm_provisioning_admin_manual', 'subscription', plan, {
+            vmsCreated: provisioningResult.vmsCreated || [],
+            planType: planType,
+            vmCount: vmCount,
+            triggeredBy: req.user.username,
+            provisioningResult: provisioningResult
+          }, clientIP, req.user.id);
+        } catch (logError) {
+          console.error('Failed to log VM provisioning success:', logError);
+        }
+
+      } catch (provisioningError) {
+        console.error('VM provisioning failed for manual subscription:', provisioningError);
+        provisioningMessage = ' (VM provisioning failed - please provision manually)';
+        
+        // Log VM provisioning failure but don't fail the subscription assignment
+        try {
+          db.logAction(userId, 'vm_provisioning_failed', 'subscription', plan, {
+            error: provisioningError.message,
+            planType: planType || 'unknown',
+            vmCount: vmCount || 1,
+            triggeredBy: req.user.username
+          }, clientIP, req.user.id);
+        } catch (logError) {
+          console.error('Failed to log VM provisioning failure:', logError);
+        }
+      }
+
+      // Fetch updated user to verify - with error handling
+      let updatedUser = null;
+      try {
+        updatedUser = await db.findUserById(userId);
+        console.log('Post-assignment verification:', updatedUser?.subscription);
+      } catch (verifyError) {
+        console.error('Failed to verify user update:', verifyError);
+      }
 
       res.json({
-        message: 'Subscription assigned successfully',
+        message: `Subscription assigned successfully${provisioningMessage}`,
         subscription: {
           plan: plan,
           status: 'active',
@@ -662,7 +758,15 @@ router.post('/users/:userId/assign-subscription', authenticateToken, requireAdmi
   } catch (error) {
     console.error('Error in assign-subscription route:', error);
     console.error('Error stack:', error.stack);
-    res.status(500).json({ error: 'Failed to assign subscription' });
+    
+    // Check database health after error
+    const isHealthy = db.isHealthy();
+    console.log('Database health after route error:', isHealthy);
+    
+    res.status(500).json({ 
+      error: 'Failed to assign subscription',
+      details: isHealthy ? 'Internal error' : 'Database connectivity issue'
+    });
   }
 });
 
@@ -1039,6 +1143,249 @@ router.get('/debug/template-status', authenticateToken, requireAdmin, async (req
       error: 'Failed to check template status',
       details: error.message 
     });
+  }
+});
+
+// Production monitoring endpoints
+router.get('/monitoring/system-health', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const proxmoxService = require('../services/proxmox');
+    
+    // Get system metrics
+    const nodeInfo = await proxmoxService.getNodeInfo();
+    const vms = await proxmoxService.getVMs();
+    
+    // Database stats
+    const dbStats = await db.getSystemStats();
+    
+    // Recent activity - focus on operational/technical activities
+    const recentLogs = db.db.prepare(`
+      SELECT action, resource_type, created_at, COUNT(*) as count
+      FROM audit_logs 
+      WHERE created_at >= datetime('now', '-24 hours')
+      AND (
+        action LIKE '%vm%' OR 
+        action LIKE '%provisioning%' OR 
+        action LIKE '%webhook%' OR
+        action LIKE '%system%' OR
+        action LIKE '%error%' OR
+        action LIKE '%failed%' OR
+        action = 'server_overview_accessed' OR
+        action = 'monitoring_data_accessed'
+      )
+      GROUP BY action, resource_type
+      ORDER BY created_at DESC
+      LIMIT 15
+    `).all();
+    
+    // Error tracking
+    const recentErrors = db.db.prepare(`
+      SELECT * FROM audit_logs 
+      WHERE action LIKE '%failed%' OR action LIKE '%error%'
+      AND created_at >= datetime('now', '-24 hours')
+      ORDER BY created_at DESC
+      LIMIT 20
+    `).all();
+    
+    // VM provisioning status
+    const provisioningStats = db.db.prepare(`
+      SELECT 
+        COUNT(*) as total_provisions,
+        COUNT(CASE WHEN action = 'vms_provisioned' THEN 1 END) as successful,
+        COUNT(CASE WHEN action LIKE '%failed%' THEN 1 END) as failed
+      FROM audit_logs 
+      WHERE resource_type = 'subscription' 
+      AND created_at >= datetime('now', '-7 days')
+    `).get();
+    
+    res.json({
+      timestamp: new Date().toISOString(),
+      system: {
+        proxmox: {
+          status: 'online',
+          node: nodeInfo.node,
+          cpu: nodeInfo.cpu,
+          memory: nodeInfo.memory,
+          uptime: nodeInfo.uptime,
+          loadAvg: nodeInfo.loadavg
+        },
+        database: {
+          users: dbStats.totalUsers,
+          activeSubscriptions: dbStats.activeSubscriptions,
+          totalVMs: vms.filter(vm => !vm.template).length,
+          templates: vms.filter(vm => vm.template).length
+        }
+      },
+      activity: {
+        recentActions: recentLogs,
+        recentErrors: recentErrors,
+        provisioning: provisioningStats
+      },
+      alerts: [
+        ...(nodeInfo.memory.usage > 90 ? [{
+          type: 'critical',
+          message: `High memory usage: ${nodeInfo.memory.usage}%`,
+          component: 'proxmox'
+        }] : []),
+        ...(nodeInfo.cpu.usage > 80 ? [{
+          type: 'warning', 
+          message: `High CPU usage: ${nodeInfo.cpu.usage}%`,
+          component: 'proxmox'
+        }] : []),
+        ...(recentErrors.length > 10 ? [{
+          type: 'warning',
+          message: `${recentErrors.length} errors in last 24 hours`,
+          component: 'system'
+        }] : [])
+      ]
+    });
+    
+  } catch (error) {
+    console.error('Error getting system health:', error);
+    res.status(500).json({ error: 'Failed to get system health' });
+  }
+});
+
+// VM provisioning history
+router.get('/monitoring/vm-provisioning', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { limit = 50, offset = 0 } = req.query;
+    
+    const provisioningHistory = db.db.prepare(`
+      SELECT 
+        al.*,
+        u.username,
+        u.uuid as userAccountId,
+        u.email
+      FROM audit_logs al
+      LEFT JOIN users u ON al.user_id = u.id
+      WHERE al.action IN ('vms_provisioned', 'vm_provisioning_failed', 'vm_provisioning_admin_manual')
+      ORDER BY al.created_at DESC
+      LIMIT ? OFFSET ?
+    `).all(parseInt(limit), parseInt(offset));
+    
+    // Get failed webhook attempts
+    const failedWebhooks = db.db.prepare(`
+      SELECT * FROM audit_logs 
+      WHERE action = 'webhook_processing_failed'
+      AND created_at >= datetime('now', '-7 days')
+      ORDER BY created_at DESC
+      LIMIT 20
+    `).all();
+    
+    res.json({
+      provisioningHistory: provisioningHistory.map(log => ({
+        ...log,
+        details: JSON.parse(log.details || '{}'),
+        timestamp: log.created_at
+      })),
+      failedWebhooks,
+      pagination: {
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        hasMore: provisioningHistory.length === parseInt(limit)
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error getting VM provisioning history:', error);
+    res.status(500).json({ error: 'Failed to get provisioning history' });
+  }
+});
+
+// Real-time webhook monitoring
+router.get('/monitoring/webhooks', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const recentWebhooks = db.db.prepare(`
+      SELECT * FROM audit_logs 
+      WHERE action LIKE '%webhook%'
+      AND created_at >= datetime('now', '-24 hours')
+      ORDER BY created_at DESC
+      LIMIT 100
+    `).all();
+    
+    const webhookStats = db.db.prepare(`
+      SELECT 
+        DATE(created_at) as date,
+        COUNT(*) as total,
+        COUNT(CASE WHEN action = 'webhook_processed' THEN 1 END) as successful,
+        COUNT(CASE WHEN action = 'webhook_processing_failed' THEN 1 END) as failed
+      FROM audit_logs 
+      WHERE action LIKE '%webhook%'
+      AND created_at >= datetime('now', '-7 days')
+      GROUP BY DATE(created_at)
+      ORDER BY date DESC
+    `).all();
+    
+    res.json({
+      recentWebhooks: recentWebhooks.map(log => ({
+        ...log,
+        details: JSON.parse(log.details || '{}')
+      })),
+      statistics: webhookStats,
+      summary: {
+        last24Hours: recentWebhooks.length,
+        successRate: webhookStats.length > 0 ? 
+          (webhookStats.reduce((acc, stat) => acc + stat.successful, 0) / 
+           webhookStats.reduce((acc, stat) => acc + stat.total, 0) * 100).toFixed(1) + '%' : 'N/A'
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error getting webhook monitoring data:', error);
+    res.status(500).json({ error: 'Failed to get webhook data' });
+  }
+});
+
+// User activity analytics  
+router.get('/monitoring/user-activity', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const activeUsers = db.db.prepare(`
+      SELECT 
+        u.id,
+        u.username,
+        u.uuid as accountId,
+        u.email,
+        u.last_login,
+        COUNT(vm.vmid) as vmCount,
+        u.subscription_data
+      FROM users u
+      LEFT JOIN vm_assignments vm ON u.id = vm.user_id
+      WHERE u.role = 'customer'
+      GROUP BY u.id
+      ORDER BY u.last_login DESC
+      LIMIT 50
+    `).all();
+    
+    const subscriptionBreakdown = db.db.prepare(`
+      SELECT 
+        JSON_EXTRACT(subscription_data, '$.plan') as plan,
+        COUNT(*) as count,
+        AVG(CASE WHEN JSON_EXTRACT(subscription_data, '$.status') = 'active' THEN 1 ELSE 0 END) as activePercentage
+      FROM users 
+      WHERE subscription_data IS NOT NULL
+      AND JSON_EXTRACT(subscription_data, '$.plan') != 'none'
+      GROUP BY JSON_EXTRACT(subscription_data, '$.plan')
+    `).all();
+    
+    res.json({
+      activeUsers: activeUsers.map(user => ({
+        ...user,
+        subscription: user.subscription_data ? JSON.parse(user.subscription_data) : null,
+        lastLoginFormatted: user.last_login ? 
+          new Date(user.last_login).toLocaleDateString() : 'Never'
+      })),
+      subscriptionBreakdown,
+      totals: {
+        totalUsers: activeUsers.length,
+        usersWithVMs: activeUsers.filter(u => u.vmCount > 0).length,
+        usersWithSubscriptions: activeUsers.filter(u => u.subscription_data).length
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error getting user activity data:', error);
+    res.status(500).json({ error: 'Failed to get user activity data' });
   }
 });
 
