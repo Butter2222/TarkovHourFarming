@@ -207,15 +207,18 @@ class ProxmoxService {
   async cloneVM(sourceVmid, newVmid, vmName, options = {}) {
     await this.ensureAuthenticated();
     try {
+      // Extract internal options that shouldn't be sent to Proxmox API
+      const { fullClone, ...proxmoxOptions } = options;
+      
       const cloneParams = {
         newid: newVmid,
         name: vmName,
-        full: options.fullClone ? 1 : 0, // 0 for linked clone, 1 for full clone
+        full: fullClone ? 1 : 0, // 0 for linked clone, 1 for full clone
         target: this.node,
-        ...options
+        ...proxmoxOptions  // Only include valid Proxmox parameters
       };
 
-      console.log(`Creating ${options.fullClone ? 'full' : 'linked'} clone of VM ${sourceVmid} -> ${newVmid} (${vmName})`);
+      console.log(`Creating ${fullClone ? 'full' : 'linked'} clone of VM ${sourceVmid} -> ${newVmid} (${vmName})`);
       console.log('Clone parameters:', JSON.stringify(cloneParams, null, 2));
       
       const response = await this.client.post(
