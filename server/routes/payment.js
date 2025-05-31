@@ -883,7 +883,7 @@ async function handleSubscriptionUpdated(subscription) {
     priceId: subscription.items?.data?.[0]?.price?.id
   });
   
-  const userId = await findUserByStripeCustomer(subscription.customer);
+  const userId = await findUserByStripeCustomer(subscription.customer, subscription.metadata);
   console.log(`Found user ID: ${userId} for customer: ${subscription.customer}`);
   
   if (userId) {
@@ -1002,7 +1002,7 @@ async function handleSubscriptionUpdated(subscription) {
 async function handleSubscriptionDeleted(subscription) {
   console.log(`Subscription deleted: ${subscription.id}`);
   
-  const userId = await findUserByStripeCustomer(subscription.customer);
+  const userId = await findUserByStripeCustomer(subscription.customer, subscription.metadata);
   if (userId) {
     await db.updateUserSubscription(userId, {
       plan: 'none',
@@ -1129,16 +1129,36 @@ async function handleRefundCreated(refund) {
 }
 
 // Helper function to find user by Stripe customer ID
-async function findUserByStripeCustomer(customerId) {
+async function findUserByStripeCustomer(customerId, subscriptionMetadata = null) {
   if (!customerId) return null;
   
   try {
+    // First try to find by customer ID in subscription_data (existing users)
     const result = db.db.prepare(`
       SELECT id FROM users 
       WHERE subscription_data LIKE ?
     `).get(`%"stripeCustomerId":"${customerId}"%`);
     
-    return result?.id || null;
+    if (result?.id) {
+      console.log(`Found user ${result.id} by stored customer ID: ${customerId}`);
+      return result.id;
+    }
+    
+    // If not found and we have subscription metadata with userId, use that
+    if (subscriptionMetadata?.userId) {
+      const userId = parseInt(subscriptionMetadata.userId);
+      console.log(`Customer ID lookup failed, trying metadata userId: ${userId}`);
+      
+      // Verify this user exists
+      const user = await db.findUserById(userId);
+      if (user) {
+        console.log(`Found user ${userId} via subscription metadata`);
+        return userId;
+      }
+    }
+    
+    console.log(`Could not find user for customer: ${customerId}`);
+    return null;
   } catch (error) {
     console.error('Error finding user by Stripe customer:', error);
     return null;
@@ -1635,6 +1655,87 @@ router.post('/debug/trigger-vm-provisioning', authenticateToken, async (req, res
 
   } catch (error) {
     console.error('Debug VM provisioning failed:', error);
+    res.status(500).json({ 
+      error: 'VM provisioning failed', 
+      details: error.message 
+    });
+  }
+});
+
+// Debug endpoint to manually provision VMs for users who missed webhook provisioning
+router.post('/debug/provision-missing-vms', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+
+  try {
+    const { userId } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'userId required' });
+    }
+
+    console.log(`Manual VM provisioning check for user ${userId}`);
+    
+    // Get user details
+    const user = await db.findUserById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Check if user has active subscription but no VMs
+    if (!user.subscription || user.subscription.plan === 'none') {
+      return res.status(400).json({ error: 'User has no active subscription' });
+    }
+
+    const userVMs = db.getUserVMIds(userId);
+    if (userVMs.length > 0) {
+      return res.status(400).json({ 
+        error: 'User already has VMs assigned',
+        vmIds: userVMs 
+      });
+    }
+
+    // Extract plan details from subscription
+    let planType = 'hour_booster';
+    let vmCount = 1;
+    
+    if (user.subscription.plan.toLowerCase().includes('booster')) {
+      planType = 'hour_booster';
+    } else if (user.subscription.plan.toLowerCase().includes('dual')) {
+      planType = 'dual_mode';
+    } else if (user.subscription.plan.toLowerCase().includes('kd') || user.subscription.plan.toLowerCase().includes('drop')) {
+      planType = 'kd_drop';
+    }
+
+    console.log(`Provisioning VMs for user ${userId} with plan ${user.subscription.plan} (${planType})`);
+    
+    const result = await vmProvisioning.provisionVMsForUser(userId, {
+      id: user.subscription.stripeSubscriptionId || 'manual-provision',
+      metadata: {
+        planType: planType,
+        vmCount: vmCount.toString(),
+        planName: user.subscription.plan
+      },
+      planType: planType,
+      vmCount: vmCount,
+      planName: user.subscription.plan,
+      nickname: user.subscription.plan
+    });
+
+    res.json({
+      success: true,
+      message: `VM provisioning completed for user ${user.username}`,
+      result: result,
+      user: {
+        id: user.id,
+        username: user.username,
+        subscription: user.subscription
+      }
+    });
+
+  } catch (error) {
+    console.error('Manual VM provisioning failed:', error);
     res.status(500).json({ 
       error: 'VM provisioning failed', 
       details: error.message 

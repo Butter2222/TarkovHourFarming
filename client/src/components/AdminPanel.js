@@ -148,6 +148,11 @@ const AdminPanel = () => {
         url = `/api/admin/users/${userId}/assign-subscription`;
       }
       
+      // Special handling for provision-vms action  
+      if (action === 'provision-vms') {
+        url = `/api/admin/users/${userId}/provision-vms`;
+      }
+      
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -182,8 +187,22 @@ const AdminPanel = () => {
           );
         }
         
+        // Show VM provisioning success
+        if (action === 'provision-vms' && result.result) {
+          const vmCount = result.result.vmsCreated?.length || 0;
+          showToast(
+            `🚀 VMs Provisioned Successfully!\n\n` +
+            `User: ${result.user.username}\n` +
+            `Plan: ${result.user.subscription.plan}\n` +
+            `VMs Created: ${vmCount}\n` +
+            `VM IDs: ${result.result.vmsCreated?.join(', ') || 'N/A'}\n\n` +
+            `The user can now access their VMs and proceed with setup.`,
+            'success'
+          );
+        }
+        
         // Show general success message for other actions
-        if (action !== 'reset-password' && action !== 'assign-subscription') {
+        if (action !== 'reset-password' && action !== 'assign-subscription' && action !== 'provision-vms') {
           showToast(result.message || 'Action completed successfully!', 'success');
         }
         
@@ -1700,7 +1719,40 @@ const UserDetailsModal = ({ user, onClose, onAction, actionLoading, onRefresh, o
                   ))}
                 </div>
               ) : (
-                <p className="text-gray-500 dark:text-gray-400 transition-colors duration-200">No VMs assigned</p>
+                <div className="space-y-4">
+                  <p className="text-gray-500 dark:text-gray-400 transition-colors duration-200">No VMs assigned</p>
+                  
+                  {/* Show provision VMs button if user has active subscription but no VMs */}
+                  {user.subscription && user.subscription.plan && user.subscription.plan !== 'none' && (
+                    <div className="bg-yellow-50 dark:bg-yellow-900 border border-yellow-200 dark:border-yellow-600 rounded-lg p-4">
+                      <div className="flex items-center space-x-2 mb-2">
+                        <AlertTriangle className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
+                        <h5 className="font-medium text-yellow-900 dark:text-yellow-200">Missing VM Provisioning</h5>
+                      </div>
+                      <p className="text-yellow-800 dark:text-yellow-300 text-sm mb-3">
+                        This user has an active subscription ({user.subscription.plan}) but no VMs have been provisioned. 
+                        This usually happens when the webhook failed during payment processing.
+                      </p>
+                      <button
+                        onClick={() => onAction(user.id, 'provision-vms')}
+                        disabled={actionLoading[`${user.id}-provision-vms`]}
+                        className="flex items-center justify-center px-4 py-2 bg-blue-600 dark:bg-blue-500 text-white rounded-md hover:bg-blue-700 dark:hover:bg-blue-600 disabled:opacity-50 transition-colors duration-200 text-sm font-medium"
+                      >
+                        {actionLoading[`${user.id}-provision-vms`] ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            <span>Provisioning VMs...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="h-4 w-4 mr-2" />
+                            <span>Provision VMs Now</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}

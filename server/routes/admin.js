@@ -3,6 +3,7 @@ const { authenticateToken } = require('../middleware/auth');
 const db = require('../services/database');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const vmProvisioning = require('../services/vmProvisioning');
 
 // Initialize Stripe
 const stripe = process.env.STRIPE_SECRET_KEY ? require('stripe')(process.env.STRIPE_SECRET_KEY) : null;
@@ -891,6 +892,91 @@ router.post('/users/:userId/process-refund', authenticateToken, requireAdmin, as
     res.status(500).json({ 
       error: 'Failed to process refund: ' + error.message,
       details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+// Provision VMs for users who have subscriptions but no VMs
+router.post('/users/:userId/provision-vms', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const clientIP = req.ip || req.connection.remoteAddress;
+
+    console.log(`Admin VM provisioning check for user ${userId}`);
+    
+    // Get user details
+    const user = await db.findUserById(userId);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Check if user has active subscription but no VMs
+    if (!user.subscription || user.subscription.plan === 'none') {
+      return res.status(400).json({ 
+        error: 'User has no active subscription',
+        subscription: user.subscription
+      });
+    }
+
+    const userVMs = db.getUserVMIds(userId);
+    if (userVMs.length > 0) {
+      return res.status(400).json({ 
+        error: 'User already has VMs assigned',
+        vmIds: userVMs 
+      });
+    }
+
+    // Extract plan details from subscription
+    let planType = 'hour_booster';
+    let vmCount = 1;
+    
+    if (user.subscription.plan.toLowerCase().includes('booster')) {
+      planType = 'hour_booster';
+    } else if (user.subscription.plan.toLowerCase().includes('dual')) {
+      planType = 'dual_mode';
+    } else if (user.subscription.plan.toLowerCase().includes('kd') || user.subscription.plan.toLowerCase().includes('drop')) {
+      planType = 'kd_drop';
+    }
+
+    console.log(`Provisioning VMs for user ${userId} with plan ${user.subscription.plan} (${planType})`);
+    
+    const result = await vmProvisioning.provisionVMsForUser(userId, {
+      id: user.subscription.stripeSubscriptionId || 'admin-provision',
+      metadata: {
+        planType: planType,
+        vmCount: vmCount.toString(),
+        planName: user.subscription.plan
+      },
+      planType: planType,
+      vmCount: vmCount,
+      planName: user.subscription.plan,
+      nickname: user.subscription.plan
+    });
+
+    // Log the action
+    db.logAction(userId, 'vm_provisioning_admin_manual', 'subscription', user.subscription.stripeSubscriptionId || 'manual', {
+      vmsCreated: result.vmsCreated?.length || 0,
+      planType: planType,
+      vmCount: vmCount,
+      triggeredBy: req.user.username
+    }, clientIP, req.user.id);
+
+    res.json({
+      success: true,
+      message: `VM provisioning completed for user ${user.username}`,
+      result: result,
+      user: {
+        id: user.id,
+        username: user.username,
+        subscription: user.subscription
+      }
+    });
+
+  } catch (error) {
+    console.error('Admin VM provisioning failed:', error);
+    res.status(500).json({ 
+      error: 'VM provisioning failed', 
+      details: error.message 
     });
   }
 });
