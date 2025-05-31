@@ -212,22 +212,22 @@ class DatabaseService {
     // Ensure status column exists (migration for existing databases)
     try {
       this.db.exec(`ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'banned'))`);
-      console.log('✅ Added status column to users table');
+      console.log('Added status column to users table');
     } catch (error) {
       // Column probably already exists
       if (!error.message.includes('duplicate column name')) {
-        console.error('❌ Error adding status column:', error);
+        console.error('Error adding status column:', error);
       }
     }
     
     // Ensure subscription_data column exists (migration for existing databases)
     try {
       this.db.exec(`ALTER TABLE users ADD COLUMN subscription_data TEXT`);
-      console.log('✅ Added subscription_data column to users table');
+      console.log('Added subscription_data column to users table');
     } catch (error) {
       // Column probably already exists
       if (!error.message.includes('duplicate column name')) {
-        console.error('❌ Error adding subscription_data column:', error);
+        console.error('Error adding subscription_data column:', error);
       }
     }
     
@@ -241,9 +241,9 @@ class DatabaseService {
         END
         WHERE status IS NULL OR status = ''
       `);
-      console.log('✅ Migrated existing users to status system');
+      console.log('Migrated existing users to status system');
     } catch (error) {
-      console.error('❌ Error migrating user statuses:', error);
+      console.error('Error migrating user statuses:', error);
     }
     
     // Ensure performed_by_user_id column exists in audit_logs (migration for existing databases)
@@ -272,10 +272,10 @@ class DatabaseService {
     try {
       this.db.exec(`ALTER TABLE users ADD COLUMN updated_at DATETIME`);
       this.db.exec(`UPDATE users SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
-      console.log('✅ Added updated_at column to users table');
+      console.log('Added updated_at column to users table');
     } catch (error) {
       if (!error.message.includes('duplicate column name')) {
-        console.error('❌ Error adding updated_at column to users:', error);
+        console.error('Error adding updated_at column to users:', error);
       }
     }
 
@@ -283,10 +283,10 @@ class DatabaseService {
     try {
       this.db.exec(`ALTER TABLE vm_assignments ADD COLUMN updated_at DATETIME`);
       this.db.exec(`UPDATE vm_assignments SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
-      console.log('✅ Added updated_at column to vm_assignments table');
+      console.log('Added updated_at column to vm_assignments table');
     } catch (error) {
       if (!error.message.includes('duplicate column name')) {
-        console.error('❌ Error adding updated_at column to vm_assignments:', error);
+        console.error('Error adding updated_at column to vm_assignments:', error);
       }
     }
 
@@ -294,10 +294,10 @@ class DatabaseService {
     try {
       this.db.exec(`ALTER TABLE sessions ADD COLUMN updated_at DATETIME`);
       this.db.exec(`UPDATE sessions SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
-      console.log('✅ Added updated_at column to sessions table');
+      console.log('Added updated_at column to sessions table');
     } catch (error) {
       if (!error.message.includes('duplicate column name')) {
-        console.error('❌ Error adding updated_at column to sessions:', error);
+        console.error('Error adding updated_at column to sessions:', error);
       }
     }
 
@@ -305,10 +305,10 @@ class DatabaseService {
     try {
       this.db.exec(`ALTER TABLE audit_logs ADD COLUMN updated_at DATETIME`);
       this.db.exec(`UPDATE audit_logs SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
-      console.log('✅ Added updated_at column to audit_logs table');
+      console.log('Added updated_at column to audit_logs table');
     } catch (error) {
       if (!error.message.includes('duplicate column name')) {
-        console.error('❌ Error adding updated_at column to audit_logs:', error);
+        console.error('Error adding updated_at column to audit_logs:', error);
       }
     }
 
@@ -318,30 +318,30 @@ class DatabaseService {
     try {
       this.db.exec(`ALTER TABLE payments ADD COLUMN updated_at DATETIME`);
       this.db.exec(`UPDATE payments SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
-      console.log('✅ Added updated_at column to payments table');
+      console.log('Added updated_at column to payments table');
     } catch (error) {
       if (!error.message.includes('duplicate column name')) {
-        console.error('❌ Error adding updated_at column to payments:', error);
+        console.error('Error adding updated_at column to payments:', error);
       }
     }
 
     try {
       this.db.exec(`ALTER TABLE refunds ADD COLUMN updated_at DATETIME`);
       this.db.exec(`UPDATE refunds SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
-      console.log('✅ Added updated_at column to refunds table');
+      console.log('Added updated_at column to refunds table');
     } catch (error) {
       if (!error.message.includes('duplicate column name')) {
-        console.error('❌ Error adding updated_at column to refunds:', error);
+        console.error('Error adding updated_at column to refunds:', error);
       }
     }
 
     try {
       this.db.exec(`ALTER TABLE payment_disputes ADD COLUMN updated_at DATETIME`);
       this.db.exec(`UPDATE payment_disputes SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL`);
-      console.log('✅ Added updated_at column to payment_disputes table');
+      console.log('Added updated_at column to payment_disputes table');
     } catch (error) {
       if (!error.message.includes('duplicate column name')) {
-        console.error('❌ Error adding updated_at column to payment_disputes:', error);
+        console.error('Error adding updated_at column to payment_disputes:', error);
       }
     }
   }
@@ -1780,7 +1780,7 @@ class DatabaseService {
   // Payment Methods
   async recordPayment(paymentData) {
     try {
-      console.log('💾 Recording payment:', {
+      console.log('Recording payment:', {
         userId: paymentData.userId,
         stripePaymentIntentId: paymentData.stripePaymentIntentId,
         stripeCheckoutSessionId: paymentData.stripeCheckoutSessionId,
@@ -1795,7 +1795,7 @@ class DatabaseService {
       if (paymentData.stripePaymentIntentId) {
         existingPayment = this.statements.getPaymentByStripeId.get(paymentData.stripePaymentIntentId);
         if (existingPayment) {
-          console.log('⚠️ Payment already exists by payment intent ID:', existingPayment.id);
+          console.log('Payment already exists by payment intent ID:', existingPayment.id);
           return existingPayment.id;
         }
       }
@@ -1807,7 +1807,7 @@ class DatabaseService {
         `).get(paymentData.stripeCheckoutSessionId);
         
         if (sessionPayment) {
-          console.log('⚠️ Payment already exists by checkout session ID:', sessionPayment.id);
+          console.log('Payment already exists by checkout session ID:', sessionPayment.id);
           return sessionPayment.id;
         }
       }
@@ -1821,19 +1821,19 @@ class DatabaseService {
       `).get(paymentData.userId, paymentData.amount);
 
       if (recentDuplicate) {
-        console.log('⚠️ Potential duplicate payment detected (same user, amount, recent):', recentDuplicate.id);
+        console.log('Potential duplicate payment detected (same user, amount, recent):', recentDuplicate.id);
         // Only skip if it has the same payment intent or session ID
         if (paymentData.stripePaymentIntentId && recentDuplicate.stripe_payment_intent_id === paymentData.stripePaymentIntentId) {
-          console.log('⚠️ Confirmed duplicate by payment intent, skipping');
+          console.log('Confirmed duplicate by payment intent, skipping');
           return recentDuplicate.id;
         }
         if (paymentData.stripeCheckoutSessionId && recentDuplicate.stripe_checkout_session_id === paymentData.stripeCheckoutSessionId) {
-          console.log('⚠️ Confirmed duplicate by session ID, skipping');
+          console.log('Confirmed duplicate by session ID, skipping');
           return recentDuplicate.id;
         }
       }
 
-      console.log('✅ No duplicate found, creating new payment record');
+      console.log('No duplicate found, creating new payment record');
 
       const result = this.statements.insertPayment.run(
         paymentData.userId,
@@ -1867,10 +1867,10 @@ class DatabaseService {
         paymentData.performedBy || paymentData.userId
       );
 
-      console.log('✅ Payment recorded successfully with ID:', result.lastInsertRowid);
+      console.log('Payment recorded successfully with ID:', result.lastInsertRowid);
       return result.lastInsertRowid;
     } catch (error) {
-      console.error('❌ Error recording payment:', error);
+      console.error('Error recording payment:', error);
       throw error;
     }
   }

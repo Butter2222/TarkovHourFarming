@@ -179,8 +179,8 @@ router.post('/create-checkout-session', authenticateToken, async (req, res) => {
         },
       ],
       mode: 'subscription',
-      success_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/dashboard?tab=subscription&success=true&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}/dashboard?tab=subscription&canceled=true`,
+      success_url: `${process.env.CORS_ORIGIN || 'http://localhost:3000'}/dashboard?tab=subscription&success=true&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.CORS_ORIGIN || 'http://localhost:3000'}/dashboard?tab=subscription&canceled=true`,
       metadata: sessionMetadata,
       subscription_data: {
         metadata: sessionMetadata
@@ -670,6 +670,12 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
   const sig = req.headers['stripe-signature'];
   const endpointSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+  console.log('Webhook received:', {
+    hasSignature: !!sig,
+    hasSecret: !!endpointSecret,
+    bodyLength: req.body?.length
+  });
+
   if (!stripe || !endpointSecret) {
     console.log('Stripe webhook not configured');
     return res.status(400).send('Webhook not configured');
@@ -705,6 +711,11 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
     let processed = false;
     let userId = null;
 
+    console.log(`Processing webhook event: ${event.type}`, {
+      objectId: event.data.object.id,
+      customerId: event.data.object.customer || 'unknown'
+    });
+
     switch (event.type) {
       case 'payment_intent.succeeded':
         userId = await handlePaymentIntentSucceeded(event.data.object);
@@ -718,6 +729,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
 
       case 'customer.subscription.created':
       case 'customer.subscription.updated':
+        console.log(`Handling subscription event: ${event.type}`);
         userId = await handleSubscriptionUpdated(event.data.object);
         processed = true;
         break;
@@ -864,8 +876,16 @@ async function handlePaymentIntentFailed(paymentIntent) {
 
 async function handleSubscriptionUpdated(subscription) {
   console.log(`Subscription updated: ${subscription.id} - Status: ${subscription.status}`);
+  console.log(`Subscription details:`, {
+    customerId: subscription.customer,
+    status: subscription.status,
+    metadata: subscription.metadata,
+    priceId: subscription.items?.data?.[0]?.price?.id
+  });
   
   const userId = await findUserByStripeCustomer(subscription.customer);
+  console.log(`Found user ID: ${userId} for customer: ${subscription.customer}`);
+  
   if (userId) {
     // Extract plan information from subscription metadata or price
     let planName = 'Unknown Plan';
@@ -878,6 +898,7 @@ async function handleSubscriptionUpdated(subscription) {
       vmCount = parseInt(subscription.metadata.vmCount);
       // Use clean plan name without VM count
       planName = subscription.metadata.planName || planType.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+      console.log(`Plan from metadata: ${planType}, VMs: ${vmCount}, Name: ${planName}`);
     } else {
       // Fallback: try to determine from price metadata
       const priceData = subscription.items?.data?.[0]?.price;
@@ -888,15 +909,18 @@ async function handleSubscriptionUpdated(subscription) {
         let productName = priceData.product?.name || subscription.items?.data?.[0]?.price?.nickname || planName;
         // Remove VM count from product name if it exists
         planName = productName.replace(/ - \d+\s*VM[s]?/i, '');
+        console.log(`Plan from price metadata: ${planType}, VMs: ${vmCount}, Name: ${planName}`);
       } else {
         // Final fallback: check against known price IDs
         const priceId = subscription.items?.data?.[0]?.price?.id;
+        console.log(`Checking price ID: ${priceId} against known prices`);
         for (const [key, value] of Object.entries(STRIPE_PRICES)) {
           if (value === priceId) {
             const [type, count] = key.split('_');
             planType = key.replace(`_${count}`, '');
             vmCount = parseInt(count);
             planName = planType.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+            console.log(`Plan from price ID match: ${planType}, VMs: ${vmCount}, Name: ${planName}`);
             break;
           }
         }
@@ -924,8 +948,11 @@ async function handleSubscriptionUpdated(subscription) {
     if (['active', 'trialing'].includes(subscription.status)) {
       // Check if this is a new subscription that needs VM provisioning
       const userVMs = db.getUserVMIds(userId);
+      console.log(`User ${userId} currently has ${userVMs.length} VMs:`, userVMs);
+      
       if (userVMs.length === 0) {
-        console.log(`🚀 New active subscription detected for user ${userId}, provisioning VMs...`);
+        console.log(`New active subscription detected for user ${userId}, provisioning VMs...`);
+        console.log(`Provisioning details:`, { planType, vmCount, planName });
         
         try {
           // Trigger VM provisioning asynchronously
@@ -938,7 +965,7 @@ async function handleSubscriptionUpdated(subscription) {
             nickname: planName
           });
           
-          console.log(`✅ VM provisioning completed for user ${userId}:`, provisioningResult);
+          console.log(`VM provisioning completed for user ${userId}:`, provisioningResult);
           
           // Log successful provisioning
           db.logAction(userId, 'vm_provisioning_completed', 'subscription', subscription.id, {
@@ -948,7 +975,7 @@ async function handleSubscriptionUpdated(subscription) {
           }, 'webhook');
           
         } catch (provisioningError) {
-          console.error(`❌ VM provisioning failed for user ${userId}:`, provisioningError);
+          console.error(`VM provisioning failed for user ${userId}:`, provisioningError);
           
           // Log provisioning failure
           db.logAction(userId, 'vm_provisioning_failed', 'subscription', subscription.id, {
@@ -965,6 +992,8 @@ async function handleSubscriptionUpdated(subscription) {
       console.log(`Subscription ${subscription.id} is ${subscription.status}, shutting down VMs`);
       await subscriptionManager.shutdownVMsForInactiveSubscription(userId);
     }
+  } else {
+    console.log(`Could not find user for customer: ${subscription.customer}`);
   }
 
   return userId;
@@ -1544,6 +1573,72 @@ router.post('/preview-upgrade', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error previewing upgrade:', error);
     res.status(500).json({ error: 'Failed to preview upgrade pricing' });
+  }
+});
+
+// Debug endpoint to check webhook configuration
+router.get('/debug/webhook-config', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+
+  res.json({
+    stripe: {
+      configured: !!stripe,
+      webhookSecret: !!process.env.STRIPE_WEBHOOK_SECRET,
+      secretPreview: process.env.STRIPE_WEBHOOK_SECRET ? 
+        `${process.env.STRIPE_WEBHOOK_SECRET.substring(0, 8)}...` : 'Not set'
+    },
+    vmProvisioning: {
+      available: !!vmProvisioning
+    },
+    environment: {
+      nodeEnv: process.env.NODE_ENV,
+      corsOrigin: process.env.CORS_ORIGIN
+    }
+  });
+});
+
+// Debug endpoint to manually trigger VM provisioning for testing
+router.post('/debug/trigger-vm-provisioning', authenticateToken, async (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+
+  try {
+    const { userId, planType = 'hour_booster', vmCount = 1 } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'userId required' });
+    }
+
+    console.log(`Manual VM provisioning triggered by admin for user ${userId}`);
+    
+    const result = await vmProvisioning.provisionVMsForUser(userId, {
+      id: 'debug-provision',
+      metadata: {
+        planType: planType,
+        vmCount: vmCount.toString(),
+        planName: `Debug ${planType}`
+      },
+      planType: planType,
+      vmCount: vmCount,
+      planName: `Debug ${planType}`,
+      nickname: `Debug ${planType}`
+    });
+
+    res.json({
+      success: true,
+      result: result,
+      message: 'VM provisioning triggered successfully'
+    });
+
+  } catch (error) {
+    console.error('Debug VM provisioning failed:', error);
+    res.status(500).json({ 
+      error: 'VM provisioning failed', 
+      details: error.message 
+    });
   }
 });
 

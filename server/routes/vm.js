@@ -7,6 +7,11 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
+// Simple cache for server overview to reduce Proxmox API calls
+let serverOverviewCache = null;
+let serverOverviewCacheTime = 0;
+const SERVER_OVERVIEW_CACHE_TTL = 30000; // 30 seconds
+
 // Configure multer for file uploads
 const upload = multer({
   dest: 'uploads/',
@@ -111,10 +116,28 @@ router.get('/server-overview', authenticateToken, async (req, res) => {
       return res.status(403).json({ error: 'Access denied. Admin role required.' });
     }
 
-    res.json({
+    // Check cache first
+    const now = Date.now();
+    if (serverOverviewCache && (now - serverOverviewCacheTime) < SERVER_OVERVIEW_CACHE_TTL) {
+      return res.json({
+        ...serverOverviewCache,
+        cached: true,
+        cacheAge: Math.round((now - serverOverviewCacheTime) / 1000)
+      });
+    }
+
+    // Fetch fresh data from Proxmox
+    const serverData = {
       server: await proxmoxService.getNodeInfo(),
-      timestamp: new Date().toISOString()
-    });
+      timestamp: new Date().toISOString(),
+      cached: false
+    };
+
+    // Update cache
+    serverOverviewCache = serverData;
+    serverOverviewCacheTime = now;
+
+    res.json(serverData);
 
   } catch (error) {
     console.error('Error fetching server overview:', error);

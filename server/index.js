@@ -46,13 +46,47 @@ app.use(helmet({
   }
 }));
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
-});
-app.use(limiter);
+// Rate limiting with different tiers for different route types
+const createRateLimiter = (windowMs, max, message) => {
+  return rateLimit({
+    windowMs,
+    max,
+    message,
+    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+  });
+};
+
+// General API rate limiting - more lenient for regular usage
+const generalLimiter = createRateLimiter(
+  parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
+  parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 300, // 300 requests per 15 minutes (20 per minute)
+  'Too many requests from this IP, please try again later.'
+);
+
+// Stricter limits for authentication routes to prevent brute force
+const authLimiter = createRateLimiter(
+  15 * 60 * 1000, // 15 minutes
+  10, // 10 login attempts per 15 minutes
+  'Too many authentication attempts, please try again later.'
+);
+
+// Moderate limits for payment routes to prevent abuse while allowing normal usage
+const paymentLimiter = createRateLimiter(
+  15 * 60 * 1000, // 15 minutes
+  50, // 50 payment requests per 15 minutes
+  'Too many payment requests, please try again later.'
+);
+
+// Very strict limits for admin routes
+const adminLimiter = createRateLimiter(
+  15 * 60 * 1000, // 15 minutes
+  30, // 30 admin requests per 15 minutes
+  'Too many admin requests, please try again later.'
+);
+
+// Apply general rate limiting to all routes
+app.use(generalLimiter);
 
 // CORS configuration with dev/prod separation
 const corsOptions = {
@@ -115,12 +149,12 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Routes
-app.use('/api/auth', authRoutes);
+// Routes with specific rate limiting
+app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/vm', vmRoutes);
 app.use('/api/user', userRoutes);
-app.use('/api/payment', paymentRoutes);
-app.use('/api/admin', adminRoutes);
+app.use('/api/payment', paymentLimiter, paymentRoutes);
+app.use('/api/admin', adminLimiter, adminRoutes);
 
 // Serve static files from the React app build directory
 app.use(express.static(path.join(__dirname, '../client/build')));
@@ -157,4 +191,19 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`API endpoints available at http://localhost:${PORT}/api`);
+  
+  // Periodic cleanup to maintain performance
+  setInterval(() => {
+    try {
+      // Clean up expired sessions from database
+      db.cleanupExpiredSessions();
+      
+      // Log cleanup operation in development only
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Performed periodic cleanup of expired sessions');
+      }
+    } catch (error) {
+      console.error('Error during periodic cleanup:', error);
+    }
+  }, 60 * 60 * 1000); // Run every hour
 }); 
