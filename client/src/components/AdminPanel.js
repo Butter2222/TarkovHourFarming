@@ -441,6 +441,42 @@ const AdminPanel = () => {
             <UserPlus className="h-4 w-4 mr-2" />
             Add User
           </button>
+          <button 
+            onClick={async () => {
+              try {
+                const token = localStorage.getItem('token');
+                const response = await fetch('/api/admin/debug/template-status', {
+                  headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                  showToast(
+                    `Template VM Status Check:\n\n` +
+                    `VM 3000 exists: ${data.template.exists}\n` +
+                    `Is Template: ${data.template.isTemplate}\n` +
+                    `Name: ${data.template.name}\n` +
+                    `Status: ${data.template.status}\n\n` +
+                    `${data.recommendations.length > 0 ? 'Issues:\n' + data.recommendations.join('\n') : 'Template is properly configured!'}`,
+                    data.template.isTemplate ? 'success' : 'error'
+                  );
+                } else {
+                  showToast(
+                    `Template VM Check Failed:\n\n` +
+                    `Error: ${data.error}\n\n` +
+                    `Recommendations:\n${data.recommendations.join('\n')}`,
+                    'error'
+                  );
+                }
+              } catch (error) {
+                showToast('Failed to check template status: ' + error.message, 'error');
+              }
+            }}
+            className="bg-orange-600 dark:bg-orange-500 text-white px-4 py-2 rounded-md hover:bg-orange-700 dark:hover:bg-orange-600 flex items-center transition-colors duration-200"
+          >
+            <Shield className="h-4 w-4 mr-2" />
+            Check Template
+          </button>
         </div>
       </div>
 

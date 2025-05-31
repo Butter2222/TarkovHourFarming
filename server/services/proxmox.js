@@ -216,6 +216,7 @@ class ProxmoxService {
       };
 
       console.log(`Creating ${options.fullClone ? 'full' : 'linked'} clone of VM ${sourceVmid} -> ${newVmid} (${vmName})`);
+      console.log('Clone parameters:', JSON.stringify(cloneParams, null, 2));
       
       const response = await this.client.post(
         `/api2/json/nodes/${this.node}/qemu/${sourceVmid}/clone`,
@@ -225,6 +226,29 @@ class ProxmoxService {
       return response.data.data;
     } catch (error) {
       console.error(`Error cloning VM ${sourceVmid} to ${newVmid}:`, error.message);
+      
+      // Log detailed error information
+      if (error.response) {
+        console.error('Proxmox API Error Response:', {
+          status: error.response.status,
+          statusText: error.response.statusText,
+          data: error.response.data,
+          headers: error.response.headers
+        });
+      }
+      
+      // Check if source VM exists and is a template
+      try {
+        const sourceVM = await this.getVMConfig(sourceVmid);
+        console.log(`Source VM ${sourceVmid} config:`, {
+          name: sourceVM.name,
+          template: sourceVM.template,
+          exists: !!sourceVM
+        });
+      } catch (configError) {
+        console.error(`Failed to get source VM ${sourceVmid} config:`, configError.message);
+      }
+      
       throw new Error(`Failed to clone VM: ${error.message}`);
     }
   }

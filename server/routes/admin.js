@@ -981,4 +981,65 @@ router.post('/users/:userId/provision-vms', authenticateToken, requireAdmin, asy
   }
 });
 
+// Debug endpoint to check template VM status
+router.get('/debug/template-status', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const proxmoxService = require('../services/proxmox');
+    
+    console.log('Checking template VM 3000 status...');
+    
+    // Check if VM 3000 exists and get its config
+    try {
+      const templateConfig = await proxmoxService.getVMConfig(3000);
+      console.log('Template VM 3000 config:', templateConfig);
+      
+      // Check if VM 3000 is actually a template
+      const isTemplate = templateConfig.template === 1 || templateConfig.template === '1';
+      
+      // Get VM status
+      const vmStatus = await proxmoxService.getVMStatus(3000);
+      console.log('Template VM 3000 status:', vmStatus);
+      
+      res.json({
+        success: true,
+        template: {
+          vmid: 3000,
+          exists: true,
+          isTemplate: isTemplate,
+          name: templateConfig.name,
+          status: vmStatus.status,
+          config: templateConfig,
+          rawStatus: vmStatus
+        },
+        recommendations: isTemplate ? [] : ['VM 3000 is not configured as a template. Please convert it to a template in Proxmox.']
+      });
+      
+    } catch (vmError) {
+      console.error('Template VM 3000 error:', vmError.message);
+      
+      res.json({
+        success: false,
+        error: vmError.message,
+        template: {
+          vmid: 3000,
+          exists: false
+        },
+        recommendations: [
+          'VM 3000 (Windows10T) does not exist or is not accessible.',
+          'Please create a VM with ID 3000 and configure it as a template.',
+          'Make sure the VM is named "Windows10T" and is properly templated.'
+        ]
+      });
+    }
+    
+  } catch (error) {
+    console.error('Error checking template status:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to check template status',
+      details: error.message 
+    });
+  }
+});
+
 module.exports = router; 
